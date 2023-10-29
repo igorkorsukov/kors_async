@@ -39,7 +39,7 @@ namespace kors::async {
 class NotifyData
 {
 public:
-    NotifyData() {}
+    NotifyData() = default;
 
     template<typename ... T>
     void setArg(int i, const T&... val)
@@ -111,7 +111,7 @@ protected:
         int type = 0;
         Asyncable* receiver = nullptr;
         void* call = nullptr;
-        CallBack() {}
+        CallBack() = default;
         CallBack(std::thread::id threadID, int t, Asyncable* cr, void* c)
             : threadID(threadID), type(t), receiver(cr), call(c) {}
     };

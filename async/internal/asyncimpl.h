@@ -69,7 +69,7 @@ private:
     struct Call {
         Asyncable* caller = nullptr;
         IFunction* f = nullptr;
-        Call() {}
+        Call() = default;
         Call(Asyncable* c, IFunction* _f)
             : caller(c), f(_f) {}
     };

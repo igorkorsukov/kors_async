@@ -27,8 +27,6 @@ SOFTWARE.
 #include <memory>
 #include <string>
 
-#include <QtCore/qcompilerdetection.h>
-
 #include "internal/abstractinvoker.h"
 #include "async.h"
 
@@ -59,8 +57,7 @@ public:
         Resolve(Promise<T...> _p)
             : p(_p) {}
 
-        Q_REQUIRED_RESULT
-        Result operator ()(const T& ... val) const
+        [[nodiscard]] Result operator ()(const T& ... val) const
         {
             p.resolve(val ...);
             return {};
@@ -75,8 +72,7 @@ public:
         Reject(Promise<T...> _p)
             : p(_p) {}
 
-        Q_REQUIRED_RESULT
-        Result operator ()(int code, const std::string& msg) const
+        [[nodiscard]] Result operator ()(int code, const std::string& msg) const
         {
             p.reject(code, msg);
             return {};
