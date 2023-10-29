@@ -180,16 +180,6 @@ protected:
     std::mutex m_qInvokersMutex;
     std::list<QInvoker*> m_qInvokers;
 };
-
-inline void processEvents()
-{
-    AbstractInvoker::processEvents();
-}
-
-inline void onMainThreadInvoke(const std::function<void(const std::function<void()>&, bool)>& f)
-{
-    AbstractInvoker::onMainThreadInvoke(f);
-}
 }
 
 #endif // KORS_ASYNC_ABSTRACTINVOKER_H

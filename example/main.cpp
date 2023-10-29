@@ -1,13 +1,25 @@
 #include <functional>
 #include <iostream>
-#include "../async/channel.h"
-#include "../async/notification.h"
+#include <thread>
+#include <atomic>
 
-using namespace kors::async;
+// example aliases
+#include "async/asyncable.h"
+#include "async/processevents.h"
+#include "async/channel.h"
+#include "async/notification.h"
 
-struct Counter {
-    Channel<int> m_ch;
-    int m_val = 0;
+using namespace app::async;
+
+namespace app::example {
+class Counter
+{
+public:
+
+    ~Counter()
+    {
+        close();
+    }
 
     void increment()
     {
@@ -15,96 +27,173 @@ struct Counter {
         m_ch.send(m_val);
     }
 
-    Channel<int> channel() const
-    {
-        return m_ch;
-    }
-};
+    int val() const { return m_val; }
+    Channel<int> channel() const { return m_ch; }
 
-struct Receiver : public kors::async::Asyncable
-{
+    void close() { m_ch.close(); }
+
+private:
+    int m_val = 0;
     Channel<int> m_ch;
-    Notification m_nt;
-
-    Receiver(const Channel<int>& ch)
-        : m_ch(ch)
-    {
-        m_ch.onReceive(this, [](int a) {
-            std::cout << "Receiver channel: " << a << "\n";
-        });
-    }
-
-    Receiver(const Notification& nt)
-        : m_nt(nt)
-    {
-        m_nt.onNotify(this, []() {
-            std::cout << "Receiver notification\n";
-        });
-    }
 };
 
-struct Notifer
+class ChannelExample : public kors::async::Asyncable
 {
-    Notification m_nt;
-    Notification notify() const
+public:
+
+    void justChannel()
     {
-        return m_nt;
+        std::cout << "-- Just channel: subscribed to receive values, then send them" << std::endl;
+
+        Channel<int> ch;
+        ch.onReceive(nullptr, [](int v) {
+            std::cout << "[justChannel] receive val: " << v << std::endl;
+        });
+
+        for (int i = 0; i < 5; ++i) {
+            std::cout << "[justChannel] send val: " << i << std::endl;
+            ch.send(i);
+        }
     }
 
-    void send()
+    void channelFromObj()
     {
-        m_nt.notify();
-    }
-};
+        std::cout << "-- Return channel from obj and subscribed to receive values" << std::endl;
 
-int main(int argc, char* argv[])
-{
-    std::cout << "Hello World, I am async\n";
+        Counter counter;
 
-    Channel<int> ch1;
-    ch1.onReceive(nullptr, [](int a) {
-        std::cout << "onReceive a: " << a << "\n";
-    });
+        Channel<int> ch = counter.channel();
+        ch.onReceive(this, [](int v) {
+            std::cout << "[channelFromObj] receive val: " << v << std::endl;
+        });
 
-    for (int i = 0; i < 5; ++i) {
-        ch1.send(i);
-    }
-
-    Counter counter;
-
-    Channel<int> ch2 = counter.channel();
-    ch2.onReceive(nullptr, [](int a) {
-        std::cout << "counter: " << a << "\n";
-    });
-
-    for (int i = 0; i < 5; ++i) {
-        counter.increment();
-    }
-
-    {
-        Receiver r(ch2);
         for (int i = 0; i < 5; ++i) {
             counter.increment();
         }
     }
 
-    for (int i = 0; i < 5; ++i) {
-        counter.increment();
-    }
-
-    Notification nt1;
-    nt1.onNotify(nullptr, []() {
-        std::cout << "Notification 1 \n";
-    });
-
-    nt1.notify();
-
-    Notifer ntr;
-    Notification nt2 = ntr.notify();
+    void communication()
     {
-        Receiver r(nt2);
-        for (int i = 0; i < 5; ++i) {
-            ntr.send();
+        std::cout << "-- Communication:  main -> thread, thread -> main" << std::endl;
+        {
+            std::thread::id mainThreadId = std::this_thread::get_id();
+            struct Channels {
+                Channel<std::string> cmd;
+                Channel<int, int> in;
+                Channel<int> out;
+            };
+
+            Channels channels;
+
+            bool running = true;
+
+            //! NOTE Subscribe to commands, this is necessary for synchronization,
+            //! to be sure that the worker has subscribe to receive data before sending it.
+            channels.cmd.onReceive(this, [&channels, &running, mainThreadId](const std::string& cmd) {
+                //! NOTE Will be called on the subscribe thread (not the send thread),
+                //! i.e. there is no need to worry about thread safety in the callback
+                std::thread::id thId = std::this_thread::get_id();
+                std::cout << "[communication] receive thread: " << (mainThreadId == thId ? "'main'" : "'not main'") // will be main
+                          << ", cmd: " << cmd << std::endl;
+
+                //! NOTE On worker ready send in data
+                if (cmd == "worker_ready") {
+                    for (int i = 0; i < 5; ++i) {
+                        std::cout << "[communication] send thread: " << (mainThreadId == thId ? "'main'" : "'not main'") // will be main
+                                  << ", val: " << i << std::endl;
+                        channels.in.send(i, i + 10);
+                    }
+
+                    //! NOTE Close the channel to report no data.
+                    channels.in.close();
+
+                    //! NOTE On worker finished, end running main event loop imitation
+                } else if (cmd == "worker_finished") {
+                    running = false;
+                }
+            });
+
+            //! NOTE Subscribe to out data from thread
+            channels.out.onReceive(this, [mainThreadId](int val) {
+                //! NOTE Will be called on the subscribe thread (not the send thread),
+                //! i.e. there is no need to worry about thread safety in the callback
+                std::thread::id thId = std::this_thread::get_id();
+                std::cout << "[communication] receive thread: " << (mainThreadId == thId ? "'main'" : "'not main'") // will be main
+                          << ", val: " << val << std::endl;
+            });
+
+            std::thread thread([this, &channels, mainThreadId]() {
+                //! NOTE Subscribe to in data from main
+                channels.in.onReceive(this, [mainThreadId, &channels](int val1, int val2) {
+                    //! NOTE Will be called on the subscribe thread (not the send thread),
+                    //! i.e. there is no need to worry about thread safety in the callback
+                    std::thread::id thId = std::this_thread::get_id();
+                    std::cout << "[communication] receive thread: " << (mainThreadId == thId ? "'main'" : "'not main'") // will be not main
+                              << ", val1: " << val1 << ", val2: " << val2 << std::endl;
+
+                    //! NOTE Calc and send out data
+                    channels.out.send(val1 + val2);
+                });
+
+                //! NOTE On close in channel, end running worker event loop imitation
+                bool th_running = true;
+                channels.in.onClose(this, [&th_running]() {
+                    th_running = false;
+                });
+
+                //! NOTE Send worker ready
+                channels.cmd.send("worker_ready");
+
+                //! NOTE Worker event loop imitation
+                while (th_running) {
+                    app::async::processEvents();
+                    std::this_thread::yield();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                }
+
+                channels.cmd.send("worker_finished");
+            });
+
+            //! NOTE Main event loop imitation
+            while (running) {
+                app::async::processEvents();
+                std::this_thread::yield();
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+
+            thread.join();
         }
     }
+
+private:
+    Channel<std::string, int> m_ch;
+};
+}
+
+int main(int argc, char* argv[])
+{
+    std::cout << "Hello World, I am async" << std::endl;
+
+    using namespace app::example;
+
+    //! NOTE To communicate between threads us need:
+    //! 1) Call async::processEvents() on each event loop
+    //! 2) Or we can set our own callback for the main thread (app::async::onMainThreadInvoke)
+
+    /*
+    std::thread::id mainThreadId = std::this_thread::get_id();
+    app::async::onMainThreadInvoke([mainThreadId](const std::function<void()>& func, bool isAlwaysQueued) {
+        if (!isAlwaysQueued && std::this_thread::get_id() == mainThreadId) {
+            func();
+        } else {
+            //! NOTE It is required to implement a function call on the next event loop
+            //! For example, for Qt we can use QMetaObject::invokeMethod with Qt::QueuedConnection
+        }
+    });
+    */
+
+    ChannelExample chExample;
+    chExample.justChannel();
+    chExample.channelFromObj();
+    chExample.communication();
 }

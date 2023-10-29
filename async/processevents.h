@@ -21,49 +21,21 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-#include "queuedinvoker.h"
+#ifndef KORS_ASYNC_PROCESSEVENTS_H
+#define KORS_ASYNC_PROCESSEVENTS_H
 
-using namespace kors::async;
+#include "internal/abstractinvoker.h"
 
-QueuedInvoker* QueuedInvoker::instance()
+namespace kors::async {
+inline void processEvents()
 {
-    static QueuedInvoker i;
-    return &i;
+    AbstractInvoker::processEvents();
 }
 
-void QueuedInvoker::invoke(const std::thread::id& callbackTh, const Functor& f, bool isAlwaysQueued)
+inline void onMainThreadInvoke(const std::function<void(const std::function<void()>&, bool)>& f)
 {
-    if (m_onMainThreadInvoke) {
-        if (callbackTh == m_mainThreadID) {
-            m_onMainThreadInvoke(f, isAlwaysQueued);
-        }
-    }
-
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
-    m_queues[callbackTh].push(f);
+    AbstractInvoker::onMainThreadInvoke(f);
+}
 }
 
-void QueuedInvoker::processEvents()
-{
-    Queue q;
-    {
-        std::lock_guard<std::recursive_mutex> lock(m_mutex);
-        auto n = m_queues.extract(std::this_thread::get_id());
-        if (!n.empty()) {
-            q = n.mapped();
-        }
-    }
-    while (!q.empty()) {
-        const auto& f = q.front();
-        if (f) {
-            f();
-        }
-        q.pop();
-    }
-}
-
-void QueuedInvoker::onMainThreadInvoke(const std::function<void(const std::function<void()>&, bool)>& f)
-{
-    m_onMainThreadInvoke = f;
-    m_mainThreadID = std::this_thread::get_id();
-}
+#endif // KORS_ASYNC_PROCESSEVENTS_H

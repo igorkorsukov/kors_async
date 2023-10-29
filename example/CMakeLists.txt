@@ -12,4 +12,11 @@ include(${CMAKE_CURRENT_LIST_DIR}/../async/async.cmake)
 add_executable(${PROJECT_NAME}
     ${KORS_ASYNC_SRC}
     main.cpp
+    # aliases
+    async/asyncable.h
+    async/processevents.h
+    async/channel.h
+    async/notification.h
+    async/async.h
+    async/promise.h
 )
