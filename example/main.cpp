@@ -74,7 +74,7 @@ public:
 
     void communication()
     {
-        std::cout << "-- Communication:  main -> thread, thread -> main" << std::endl;
+        std::cout << "-- Communication:  main <-> thread" << std::endl;
         {
             std::thread::id mainThreadId = std::this_thread::get_id();
             struct Channels {
@@ -164,9 +164,6 @@ public:
             thread.join();
         }
     }
-
-private:
-    Channel<std::string, int> m_ch;
 };
 }
 
@@ -175,22 +172,6 @@ int main(int argc, char* argv[])
     std::cout << "Hello World, I am async" << std::endl;
 
     using namespace app::example;
-
-    //! NOTE To communicate between threads us need:
-    //! 1) Call async::processEvents() on each event loop
-    //! 2) Or we can set our own callback for the main thread (app::async::onMainThreadInvoke)
-
-    /*
-    std::thread::id mainThreadId = std::this_thread::get_id();
-    app::async::onMainThreadInvoke([mainThreadId](const std::function<void()>& func, bool isAlwaysQueued) {
-        if (!isAlwaysQueued && std::this_thread::get_id() == mainThreadId) {
-            func();
-        } else {
-            //! NOTE It is required to implement a function call on the next event loop
-            //! For example, for Qt we can use QMetaObject::invokeMethod with Qt::QueuedConnection
-        }
-    });
-    */
 
     ChannelExample chExample;
     chExample.justChannel();
