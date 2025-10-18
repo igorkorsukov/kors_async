@@ -27,7 +27,9 @@ SOFTWARE.
 #include <gtest/gtest.h>
 
 #include "../async/channel.h"
+#include "../async/processevents.h"
 
+using namespace kors;
 using namespace kors::async;
 
 class Channel_Tests : public ::testing::Test
@@ -62,9 +64,11 @@ struct Receiver : public Asyncable {
         }
 
         sender = s;
-        sender->valueChanged().onReceive(this, [this](const int& val) {
-            value = val;
-        });
+        if (sender) {
+            sender->valueChanged().onReceive(this, [this](const int& val) {
+                value = val;
+            });
+        }
     }
 };
 
@@ -184,4 +188,117 @@ TEST_F(Channel_Tests, SingleThread_Sender_MultiReceiver)
     sender.increment();
     EXPECT_EQ(receiver1.value, 1);
     EXPECT_EQ(receiver2.value, 2);
+}
+
+TEST_F(Channel_Tests, SingleThread_AutoDisconect)
+{
+    Sender sender;
+    {
+        Receiver receiver;
+        receiver.setSender(&sender);
+
+        EXPECT_EQ(receiver.value, 0);
+        EXPECT_TRUE(sender.ch.isConnected());
+
+        sender.increment();
+        EXPECT_EQ(receiver.value, 1);
+    }
+
+    // the receiver has been deleted and unsubscribed.
+    EXPECT_FALSE(sender.ch.isConnected());
+    sender.increment();
+}
+
+TEST_F(Channel_Tests, MultiThread_SendToThread)
+{
+    Channel<int, int> ch;
+
+    bool received = false;
+    auto t1 = std::thread([ch, &received]() {
+        Channel<int, int> _ch = ch;
+        _ch.onReceive(nullptr, [&received](const int& v1, const int& v2) {
+            received = true;
+            EXPECT_EQ(v1, 42);
+            EXPECT_EQ(v2, 73);
+        });
+
+        int iteration = 0;
+        while (iteration < 100) {
+            ++iteration;
+            async::processEvents();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
+
+    // wait th start and subscribe
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    ch.send(42, 73);
+
+    t1.join();
+
+    EXPECT_TRUE(received);
+}
+
+TEST_F(Channel_Tests, MultiThread_ReceiveFromThread)
+{
+    Channel<int> ch;
+
+    int receivedVal = 0;
+    ch.onReceive(nullptr, [&receivedVal](const int& val) {
+        // main thread
+        EXPECT_EQ(val, 42);
+        receivedVal = val;
+    });
+
+    auto t1 = std::thread([](Channel<int> ch) {
+        // some kind of calculation or data acquisition
+        int val = 40 + 2;
+        ch.send(val);
+    }, ch);
+
+    // emulate an event loop in the main thread
+    int iteration = 0;
+    while (iteration < 100) {
+        ++iteration;
+        async::processEvents();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    t1.join();
+
+    EXPECT_EQ(receivedVal, 42);
+}
+
+TEST_F(Channel_Tests, DISABLED_MultiThread_ReceiveFromThread_ResetOnReceive) // deadlock
+{
+    Asyncable asyncable;
+    Channel<int> ch;
+
+    int receivedVal = 0;
+    ch.onReceive(&asyncable, [&receivedVal, &ch, &asyncable](const int& val) {
+        // main thread
+        EXPECT_EQ(val, 42);
+        receivedVal = val;
+        ch.resetOnReceive(&asyncable);
+    });
+
+    auto t1 = std::thread([](Channel<int> ch) {
+        // some kind of calculation or data acquisition
+        int val = 40 + 2;
+        ch.send(val);
+        val = 70 + 30;
+        ch.send(val);
+    }, ch);
+
+    // emulate an event loop in the main thread
+    int iteration = 0;
+    while (iteration < 100) {
+        ++iteration;
+        async::processEvents();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    t1.join();
+
+    EXPECT_EQ(receivedVal, 42);
 }
