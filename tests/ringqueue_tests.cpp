@@ -31,16 +31,11 @@ SOFTWARE.
 
 using namespace kors::async;
 
-class RingQueue_Tests : public ::testing::Test
-{
-public:
-};
-
 struct Msg {
     int val = 0;
 };
 
-TEST_F(RingQueue_Tests, Base)
+TEST(RingQueue_Tests, Base)
 {
     RingQueue<Msg> q(10);
 
@@ -81,7 +76,7 @@ TEST_F(RingQueue_Tests, Base)
     t2.join();
 }
 
-TEST_F(RingQueue_Tests, Full)
+TEST(RingQueue_Tests, Full)
 {
     RingQueue<Msg> q(10);
 
@@ -127,7 +122,7 @@ TEST_F(RingQueue_Tests, Full)
     t2.join();
 }
 
-TEST_F(RingQueue_Tests, Empty)
+TEST(RingQueue_Tests, Empty)
 {
     RingQueue<Msg> q(10);
 
@@ -167,7 +162,7 @@ TEST_F(RingQueue_Tests, Empty)
     t2.join();
 }
 
-TEST_F(RingQueue_Tests, PopAll)
+TEST(RingQueue_Tests, PopAll)
 {
     RingQueue<Msg> q(10);
 
@@ -197,7 +192,7 @@ TEST_F(RingQueue_Tests, PopAll)
     t2.join();
 }
 
-TEST_F(RingQueue_Tests, FullContinue)
+TEST(RingQueue_Tests, FullContinue)
 {
     RingQueue<Msg> q(10);
 
@@ -247,7 +242,7 @@ TEST_F(RingQueue_Tests, FullContinue)
     }
 }
 
-TEST_F(RingQueue_Tests, SlowRead)
+TEST(RingQueue_Tests, SlowRead)
 {
     RingQueue<Msg> q(10);
 

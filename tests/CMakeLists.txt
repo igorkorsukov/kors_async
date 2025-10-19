@@ -21,8 +21,9 @@ include(${CMAKE_CURRENT_LIST_DIR}/../async/async.cmake)
 
 add_executable(${PROJECT_NAME}
     ${KORS_ASYNC_SRC}
-    channel_tests.cpp
     ringqueue_tests.cpp
     rpcqueue_tests.cpp
+    channel_tests.cpp
+    async_tests.cpp
 )
 target_link_libraries(${PROJECT_NAME} gtest_main)

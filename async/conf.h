@@ -23,21 +23,9 @@ SOFTWARE.
 */
 #pragma once
 
-#include "internal/queuepool.h"
+#include <cstddef>
 
 namespace kors::async {
-inline void processMessages()
-{
-    QueuePool::instance()->processMessages();
-}
-
-inline void processMessages(const std::thread::id& th)
-{
-    QueuePool::instance()->processMessages(th);
-}
-
-inline void processEvents()
-{
-    processMessages();
-}
+inline static size_t MAX_THREADS = 100;
+inline static size_t MAX_THREADS_PER_CNAHHEL = 10;
 }
