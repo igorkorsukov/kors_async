@@ -30,16 +30,11 @@ SOFTWARE.
 
 using namespace kors::async;
 
-class RpcQueue_Tests : public ::testing::Test
-{
-public:
-};
-
 struct Msg {
     int val = 0;
 };
 
-TEST_F(RpcQueue_Tests, Communication)
+TEST(RpcQueue_Tests, Communication)
 {
     RpcQueue<Msg> q;
 

@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2020 Igor Korsukov
+Copyright (c) Igor Korsukov
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,34 +21,64 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-#ifndef KORS_ASYNC_ASYNC_H
-#define KORS_ASYNC_ASYNC_H
+#pragma once
 
-#include "asyncable.h"
-#include "internal/asyncimpl.h"
+#include "internal/channelimpl.h"
 
 namespace kors::async {
 class Async
 {
+private:
+    using Call = std::function<void ()>;
+    ChannelImpl<ChannelImpl<Call>*> m_deleter;
+
+    Async()
+    {
+        m_deleter.onReceive(nullptr, [](ChannelImpl<Call>* ch) {
+            delete ch;
+        });
+    }
+
+    void deleteLater(ChannelImpl<Call>* ch)
+    {
+        m_deleter.send(SendMode::Queue, ch);
+    }
+
+    void callQueue(const Asyncable* caller, const Call& func, const std::thread::id& th)
+    {
+        ChannelImpl<Call>* ch = new ChannelImpl<Call>();
+        ch->onReceive(caller, [ch](const Call& func) {
+            func();
+            inctance()->deleteLater(ch);
+        }, th);
+        ch->send(SendMode::Queue, func);
+    }
+
 public:
+
+    static Async* inctance()
+    {
+        static Async a;
+        return &a;
+    }
+
+    static void call(const Asyncable* caller, const Call& func, const std::thread::id& th = std::this_thread::get_id())
+    {
+        inctance()->callQueue(caller, func, th);
+    }
 
     template<typename F>
     static void call(const Asyncable* caller, F f, const std::thread::id& th = std::this_thread::get_id())
     {
-        AsyncImpl::instance()->call(const_cast<Asyncable*>(caller), new AsyncImpl::Functor<F>(f), th);
+        Call c = [f]() { f(); };
+        Async::call(caller, c, th);
     }
 
     template<typename F, typename Arg1>
     static void call(const Asyncable* caller, F f, Arg1 a1, const std::thread::id& th = std::this_thread::get_id())
     {
-        AsyncImpl::instance()->call(const_cast<Asyncable*>(caller), new AsyncImpl::FunctorArg1<F, Arg1>(f, a1), th);
-    }
-
-    static void disconnectAsync(Asyncable* a)
-    {
-        AsyncImpl::instance()->disconnectAsync(a);
+        Call c = [f, a1]() { f(a1); };
+        Async::call(caller, c, th);
     }
 };
 }
-
-#endif // KORS_ASYNC_ASYNC_H

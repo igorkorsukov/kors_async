@@ -26,34 +26,29 @@ SOFTWARE.
 
 #include <memory>
 #include <string>
+#include <cassert>
 
-#include "internal/abstractinvoker.h"
+#include "internal/channelimpl.h"
 #include "async.h"
 
 namespace kors::async {
+enum class PromiseType {
+    AsyncByPromise,
+    AsyncByBody
+};
+
 template<typename ... T>
 class Promise;
 template<typename ... T>
 class Promise
 {
 public:
-    // Dummy struct, with the purpose to enforce that the body
-    // of a Promise resolves OR rejects exactly once
-    struct Result {
-        static Result unchecked()
-        {
-            return {};
-        }
-
-    private:
-        Result() = default;
-
-        friend struct Resolve;
-        friend struct Reject;
-    };
+    struct Result;
 
     struct Resolve
     {
+        Resolve() = default;
+
         Resolve(Promise<T...> _p)
             : p(_p) {}
 
@@ -69,6 +64,8 @@ public:
 
     struct Reject
     {
+        Reject() = default;
+
         Reject(Promise<T...> _p)
             : p(_p) {}
 
@@ -82,67 +79,113 @@ public:
         mutable Promise<T...> p;
     };
 
-    enum class AsynchronyType {
-        ProvidedByPromise,
-        ProvidedByBody
+    // Dummy struct, with the purpose to enforce that the body
+    // of a Promise resolves OR rejects exactly once
+    struct Result {
+        static Result unchecked()
+        {
+            return {};
+        }
+
+    private:
+        Result() = default;
+
+        friend struct Resolve;
+        friend struct Reject;
     };
 
-    using Body = std::function<Result(Resolve, Reject)>;
+    static Result dummy_result() { return Result::unchecked(); }
 
-    Promise(Body body, AsynchronyType type)
+    using BodyResolveReject = std::function<Result (Resolve, Reject)>;
+    using BodyResolve = std::function<Result (Resolve)>;
+
+    Promise(BodyResolveReject body, PromiseType type)
+        : m_has_reject(true)
     {
         Resolve res(*this);
         Reject rej(*this);
 
         switch (type) {
-        case AsynchronyType::ProvidedByPromise:
-            Async::call(nullptr, [res, rej](Body body) mutable {
+        case PromiseType::AsyncByPromise:
+            Async::call(nullptr, [res, rej](BodyResolveReject body) mutable {
                 body(res, rej);
             }, body);
             break;
 
-        case AsynchronyType::ProvidedByBody:
+        case PromiseType::AsyncByBody:
             body(res, rej);
             break;
         }
     }
 
-    Promise(Body body, const std::thread::id& th = std::this_thread::get_id())
+    Promise(BodyResolveReject body, const std::thread::id& th = std::this_thread::get_id())
+        : m_has_reject(true)
     {
         Resolve res(*this);
         Reject rej(*this);
 
-        Async::call(nullptr, [res, rej](Body body) mutable {
+        Async::call(nullptr, [res, rej](BodyResolveReject body) mutable {
             body(res, rej);
         }, body, th);
     }
 
-    Promise(const Promise& p)
-        : m_ptr(p.ptr()) {}
+    Promise(BodyResolve body, PromiseType type)
+        : m_has_reject(false)
+    {
+        Resolve res(*this);
+
+        switch (type) {
+        case PromiseType::AsyncByPromise:
+            Async::call(nullptr, [res](BodyResolve body) mutable {
+                body(res);
+            }, body);
+            break;
+
+        case PromiseType::AsyncByBody:
+            body(res);
+            break;
+        }
+    }
+
+    Promise(BodyResolve body, const std::thread::id& th = std::this_thread::get_id())
+        : m_has_reject(false)
+    {
+        Resolve res(*this);
+
+        Async::call(nullptr, [res](BodyResolve body) mutable {
+            body(res);
+        }, body, th);
+    }
+
+    // Promise(const Promise& p)
+    //     : m_ptr(p.ptr()), m_has_reject(p.m_has_reject) {}
 
     ~Promise() {}
 
     Promise& operator=(const Promise& p)
     {
-        if (m_ptr == p.ptr()) {
-            return *this;
-        }
+        // if (m_ptr == p.ptr()) {
+        //     return *this;
+        // }
 
-        m_ptr = p.ptr();
+        // m_ptr = p.ptr();
+        m_has_reject = p.m_has_reject;
         return *this;
     }
 
     template<typename Call>
     Promise<T...>& onResolve(const Asyncable* caller, Call f)
     {
-        ptr()->addCallBack(OnResolve, const_cast<Asyncable*>(caller), new ResolveCall<Call, T...>(f));
+        //ptr()->addCallBack(OnResolve, const_cast<Asyncable*>(caller), new ResolveCall<Call, T...>(f));
         return *this;
     }
 
     template<typename Call>
     Promise<T...>& onReject(const Asyncable* caller, Call f)
     {
-        ptr()->addCallBack(OnReject, const_cast<Asyncable*>(caller), new RejectCall<Call>(f));
+        assert(m_has_reject && "This promise has no rejection");
+
+        //ptr()->addCallBack(OnReject, const_cast<Asyncable*>(caller), new RejectCall<Call>(f));
         return *this;
     }
 
@@ -151,102 +194,35 @@ private:
 
     void resolve(const T& ... d)
     {
-        NotifyData nd;
-        nd.setArg<T...>(0, d ...);
-        nd.setArg<std::shared_ptr<PromiseInvoker> >(1, ptr());
-        ptr()->invoke(OnResolve, nd);
+        // NotifyData nd;
+        // nd.setArg<T...>(0, d ...);
+        // nd.setArg<std::shared_ptr<PromiseInvoker> >(1, ptr());
+        // ptr()->invoke(OnResolve, nd);
     }
 
     void reject(int code, const std::string& msg)
     {
-        NotifyData nd;
-        nd.setArg<int>(0, code);
-        nd.setArg<std::string>(1, msg);
-        nd.setArg<std::shared_ptr<PromiseInvoker> >(2, ptr());
-        ptr()->invoke(OnReject, nd);
+        // NotifyData nd;
+        // nd.setArg<int>(0, code);
+        // nd.setArg<std::string>(1, msg);
+        // nd.setArg<std::shared_ptr<PromiseInvoker> >(2, ptr());
+        // ptr()->invoke(OnReject, nd);
     }
 
-    enum CallType {
-        Undefined = 0,
-        OnResolve,
-        OnReject
-    };
-
-    struct IResolve {
-        virtual ~IResolve() {}
-        virtual void resolved(const NotifyData& e) = 0;
-    };
-
-    template<typename Call, typename ... Arg>
-    struct ResolveCall : public IResolve {
-        Call f;
-        ResolveCall(Call _f)
-            : f(_f) {}
-        void resolved(const NotifyData& e) { std::apply(f, e.args<Arg...>()); }
-    };
-
-    struct IReject {
-        virtual ~IReject() {}
-        virtual void rejected(const NotifyData& e) = 0;
-    };
-
-    template<typename Call>
-    struct RejectCall : public IReject {
-        Call f;
-        RejectCall(Call _f)
-            : f(_f) {}
-        void rejected(const NotifyData& e) { f(e.arg<int>(0), e.arg<std::string>(1)); }
-    };
-
-    struct PromiseInvoker : public AbstractInvoker
-    {
-        friend class Promise;
-
-        PromiseInvoker() = default;
-        ~PromiseInvoker()
-        {
-            removeAllCallBacks();
-        }
-
-        void deleteCall(int _type, void* call) override
-        {
-            CallType type = static_cast<CallType>(_type);
-            switch (type) {
-            case Undefined: {} break;
-            case OnResolve: {
-                delete static_cast<IResolve*>(call);
-            } break;
-            case OnReject: {
-                delete static_cast<IReject*>(call);
-            } break;
-            }
-        }
-
-        void doInvoke(int callKey, void* call, const NotifyData& d) override
-        {
-            CallType type = static_cast<CallType>(callKey);
-            switch (type) {
-            case Undefined:  break;
-            case OnResolve:
-                static_cast<IResolve*>(call)->resolved(d);
-                break;
-            case OnReject:
-                static_cast<IReject*>(call)->rejected(d);
-                break;
-            }
-        }
-    };
-
-    std::shared_ptr<PromiseInvoker> ptr() const
-    {
-        if (!m_ptr) {
-            m_ptr = std::make_shared<PromiseInvoker>();
-        }
-        return m_ptr;
-    }
-
-    mutable std::shared_ptr<PromiseInvoker> m_ptr = nullptr;
+    bool m_has_reject = false;
 };
+
+template<typename ... T>
+inline Promise<T...> make_promise(typename Promise<T...>::BodyResolveReject f, PromiseType type = PromiseType::AsyncByPromise)
+{
+    return Promise<T...>(f, type);
+}
+
+template<typename ... T>
+inline Promise<T...> make_promise(typename Promise<T...>::BodyResolve f, PromiseType type = PromiseType::AsyncByPromise)
+{
+    return Promise<T...>(f, type);
+}
 }
 
 #endif // KORS_ASYNC_PROMISE_H

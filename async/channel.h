@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2020 Igor Korsukov
+Copyright (c) Igor Korsukov
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,149 +21,119 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-#ifndef KORS_ASYNC_CHANNEL_H
-#define KORS_ASYNC_CHANNEL_H
+#pragma once
 
 #include <memory>
-#include "internal/abstractinvoker.h"
+
+#include "asyncable.h"
+#include "internal/channelimpl.h"
 
 namespace kors::async {
 template<typename ... T>
 class Channel
 {
 public:
-    Channel() = default;
+
+    using Callback = typename ChannelImpl<T...>::Callback;
+
+private:
+
+    struct Data {
+        ChannelImpl<T...> mainCh;
+        std::unique_ptr<ChannelImpl<> > closeCh;
+        std::unique_ptr<ChannelImpl<const Asyncable*> > disconnectCh;
+    };
+
+    std::shared_ptr<Data> m_data;
+
+public:
+    Channel()
+        : m_data(std::make_shared<Data>())
+    {
+    }
+
     Channel(const Channel& ch)
-        : m_ptr(ch.ptr()) {}
-    ~Channel() {}
+        : m_data(ch.m_data)
+    {
+    }
+
+    ~Channel() = default;
 
     Channel& operator=(const Channel& ch)
     {
-        if (m_ptr == ch.ptr()) {
-            return *this;
-        }
-
-        m_ptr = ch.ptr();
+        m_data = ch.m_data;
         return *this;
     }
 
-    void send(const T&... d)
+    void send(const T&... args)
     {
-        NotifyData nd;
-        nd.setArg<T...>(0, d ...);
-        ptr()->invoke(Receive, nd);
+        m_data->mainCh.send(SendMode::Auto, args ...);
+    }
+
+    void onReceive(const Asyncable* receiver, const Callback& f)
+    {
+        m_data->mainCh.onReceive(receiver, f);
     }
 
     template<typename Func>
-    void onReceive(const Asyncable* receiver, Func f, Asyncable::AsyncMode mode = Asyncable::AsyncMode::AsyncSetOnce)
+    void onReceive(const Asyncable* receiver, Func f)
     {
-        ptr()->addCallBack(Receive, const_cast<Asyncable*>(receiver), new ReceiveCall<Func, T...>(f), mode);
+        Callback callback = [f](const T&... args) {
+            f(args ...);
+        };
+        onReceive(receiver, callback);
     }
 
-    void resetOnReceive(const Asyncable* receiver)
+    void disconnect(const Asyncable* a)
     {
-        ptr()->removeCallBack(Receive, const_cast<Asyncable*>(receiver));
+        bool ok = m_data->mainCh.disconnectReceiver(a);
+        if (!ok) {
+            m_data->mainCh.disableReceiver(a);
+            if (!m_data->disconnectCh) {
+                m_data->disconnectCh = std::make_unique<ChannelImpl<const Asyncable*> >();
+                m_data->disconnectCh->onReceive(nullptr, [this](const Asyncable* a) {
+                    disconnect(a);
+                });
+            }
+
+            m_data->disconnectCh->send(SendMode::Queue, a);
+        }
+    }
+
+    void resetOnReceive(const Asyncable* a)
+    {
+        disconnect(a);
     }
 
     void close()
     {
-        ptr()->invoke(Close);
+        if (m_data->closeCh) {
+            m_data->closeCh->send(SendMode::Auto);
+        }
+    }
+
+    void onClose(const Asyncable* receiver, const std::function<void()>& f)
+    {
+        if (!m_data->closeCh) {
+            m_data->closeCh = std::make_unique<ChannelImpl<> >();
+        }
+        m_data->closeCh->onReceive(receiver, f);
     }
 
     template<typename Func>
-    void onClose(const Asyncable* receiver, Func f, Asyncable::AsyncMode mode = Asyncable::AsyncMode::AsyncSetOnce)
+    void onClose(const Asyncable* receiver, Func f)
     {
-        ptr()->addCallBack(Close, const_cast<Asyncable*>(receiver), new CloseCall<Func>(f), mode);
+        std::function<void()> callback = [f]() {
+            f();
+        };
+        onClose(receiver, callback);
     }
 
     bool isConnected() const
     {
-        return m_ptr && ptr()->isConnected();
+        return m_data->mainCh.isConnected();
     }
 
-private:
-
-    enum CallType {
-        Undefined = 0,
-        Receive,
-        Close
-    };
-
-    struct IReceive {
-        virtual ~IReceive() {}
-        virtual void received(const NotifyData& d) = 0;
-    };
-
-    template<typename Call, typename ... Arg>
-    struct ReceiveCall : public IReceive {
-        Call f;
-        ReceiveCall(Call _f)
-            : f(_f) {}
-        void received(const NotifyData& d) { std::apply(f, d.args<Arg...>()); }
-    };
-
-    struct IClose {
-        virtual ~IClose() {}
-        virtual void closed() = 0;
-    };
-
-    template<typename Call>
-    struct CloseCall : public IClose {
-        Call f;
-        CloseCall(Call _f)
-            : f(_f) {}
-        void closed() { f(); }
-    };
-
-    struct ChannelInvoker : public AbstractInvoker
-    {
-        friend class Channel;
-
-        ChannelInvoker() = default;
-        ~ChannelInvoker()
-        {
-            removeAllCallBacks();
-        }
-
-        void deleteCall(int _type, void* call) override
-        {
-            CallType type = static_cast<CallType>(_type);
-            switch (type) {
-            case Undefined: {} break;
-            case Receive: {
-                delete static_cast<IReceive*>(call);
-            } break;
-            case Close: {
-                delete static_cast<IClose*>(call);
-            } break;
-            }
-        }
-
-        void doInvoke(int callKey, void* call, const NotifyData& d) override
-        {
-            CallType type = static_cast<CallType>(callKey);
-            switch (type) {
-            case Undefined:  break;
-            case Receive:
-                static_cast<IReceive*>(call)->received(d);
-                break;
-            case Close:
-                static_cast<IClose*>(call)->closed();
-                break;
-            }
-        }
-    };
-
-    std::shared_ptr<ChannelInvoker> ptr() const
-    {
-        if (!m_ptr) {
-            m_ptr = std::make_shared<ChannelInvoker>();
-        }
-        return m_ptr;
-    }
-
-    mutable std::shared_ptr<ChannelInvoker> m_ptr = nullptr;
+    uint64_t key() const { return reinterpret_cast<uint64_t>(m_data.get()); }
 };
 }
-
-#endif // KORS_ASYNC_CHANNEL_H

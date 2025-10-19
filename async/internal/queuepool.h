@@ -1,7 +1,7 @@
 /*
 MIT License
 
-Copyright (c) 2020 Igor Korsukov
+Copyright (c) Igor Korsukov
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,40 +21,54 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-#ifndef KORS_ASYNC_QUEUEDINVOKER_H
-#define KORS_ASYNC_QUEUEDINVOKER_H
+#pragma once
 
-#include <functional>
-#include <queue>
-#include <map>
-#include <mutex>
 #include <thread>
+#include <vector>
+#include <memory>
+#include <mutex>
+
+#include "rpcqueue.h"
+
+#include "../asyncable.h"
 
 namespace kors::async {
-class QueuedInvoker
+struct CallMsg {
+    Asyncable* receiver = nullptr;
+    std::function<void(const void*)> func;
+};
+
+//! NOTE The queue capacity, if there are more unprocessed messages,
+//! they will not be lost, but will be sent to the next process
+inline static const size_t QUEUE_CAPACITY = 16;
+using Queue = RpcQueue<CallMsg>;
+using Port = RpcPort<CallMsg>;
+
+class QueuePool
 {
 public:
 
-    static QueuedInvoker* instance();
+    static QueuePool* instance();
 
-    using Functor = std::function<void ()>;
+    void regPort(const std::thread::id& th, const std::shared_ptr<Port>& port);
+    void unregPort(const std::thread::id& th, const std::shared_ptr<Port>& port);
 
-    void invoke(const std::thread::id& th, const Functor& f, bool isAlwaysQueued = false);
-    void processEvents();
-    void onMainThreadInvoke(const std::function<void(const std::function<void()>&, bool)>& f);
+    void processMessages();
+    void processMessages(const std::thread::id& th);
 
 private:
 
-    QueuedInvoker() = default;
+    QueuePool();
+    ~QueuePool();
 
-    using Queue = std::queue<Functor>;
+    struct ThreadData {
+        std::thread::id threadId;
+        std::vector<std::shared_ptr<Port> > ports;
+        std::atomic<bool> locked = false;
+    };
 
-    std::recursive_mutex m_mutex;
-    std::map<std::thread::id, Queue > m_queues;
-
-    std::function<void(const std::function<void()>&, bool)> m_onMainThreadInvoke;
-    std::thread::id m_mainThreadID;
+    std::mutex m_mutex;
+    std::vector<ThreadData*> m_threads;
+    std::atomic<size_t> m_count = 0;
 };
 }
-
-#endif // KORS_ASYNC_QUEUEDINVOKER_H

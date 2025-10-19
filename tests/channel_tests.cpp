@@ -32,11 +32,6 @@ SOFTWARE.
 using namespace kors;
 using namespace kors::async;
 
-class Channel_Tests : public ::testing::Test
-{
-public:
-};
-
 //! NOTE For example, this could be some kind of service.
 struct Sender {
     int value = 0;
@@ -72,7 +67,7 @@ struct Receiver : public Asyncable {
     }
 };
 
-TEST_F(Channel_Tests, SingleThread_Send)
+TEST(Channel_Tests, SingleThread_Send)
 {
     Channel<int> ch;
 
@@ -87,7 +82,7 @@ TEST_F(Channel_Tests, SingleThread_Send)
     EXPECT_EQ(receivedVal, 42);
 }
 
-TEST_F(Channel_Tests, SingleThread_Send_FromObject)
+TEST(Channel_Tests, SingleThread_Send_FromObject)
 {
     Sender sender;
 
@@ -106,7 +101,7 @@ TEST_F(Channel_Tests, SingleThread_Send_FromObject)
     EXPECT_EQ(receivedVal, 2);
 }
 
-TEST_F(Channel_Tests, SingleThread_Send_Reset)
+TEST(Channel_Tests, SingleThread_Send_Reset)
 {
     Asyncable asyncable;
     Sender sender;
@@ -128,7 +123,7 @@ TEST_F(Channel_Tests, SingleThread_Send_Reset)
     EXPECT_EQ(receivedVal, 1);
 }
 
-TEST_F(Channel_Tests, SingleThread_Send_Reset_onReceive)
+TEST(Channel_Tests, SingleThread_Send_Reset_onReceive)
 {
     Asyncable asyncable;
     Sender sender;
@@ -149,7 +144,7 @@ TEST_F(Channel_Tests, SingleThread_Send_Reset_onReceive)
     EXPECT_EQ(receivedVal, 1);
 }
 
-TEST_F(Channel_Tests, SingleThread_Sender_Receiver)
+TEST(Channel_Tests, SingleThread_Sender_Receiver)
 {
     Sender sender;
     Receiver receiver;
@@ -167,7 +162,7 @@ TEST_F(Channel_Tests, SingleThread_Sender_Receiver)
     EXPECT_EQ(receiver.value, 1);
 }
 
-TEST_F(Channel_Tests, SingleThread_Sender_MultiReceiver)
+TEST(Channel_Tests, SingleThread_Sender_MultiReceiver)
 {
     Sender sender;
     Receiver receiver1;
@@ -190,7 +185,7 @@ TEST_F(Channel_Tests, SingleThread_Sender_MultiReceiver)
     EXPECT_EQ(receiver2.value, 2);
 }
 
-TEST_F(Channel_Tests, SingleThread_AutoDisconect)
+TEST(Channel_Tests, SingleThread_AutoDisconect)
 {
     Sender sender;
     {
@@ -209,7 +204,7 @@ TEST_F(Channel_Tests, SingleThread_AutoDisconect)
     sender.increment();
 }
 
-TEST_F(Channel_Tests, MultiThread_SendToThread)
+TEST(Channel_Tests, MultiThread_SendToThread)
 {
     Channel<int, int> ch;
 
@@ -239,7 +234,7 @@ TEST_F(Channel_Tests, MultiThread_SendToThread)
     EXPECT_TRUE(received);
 }
 
-TEST_F(Channel_Tests, MultiThread_ReceiveFromThread)
+TEST(Channel_Tests, MultiThread_ReceiveFromThread)
 {
     Channel<int> ch;
 
@@ -269,7 +264,7 @@ TEST_F(Channel_Tests, MultiThread_ReceiveFromThread)
     EXPECT_EQ(receivedVal, 42);
 }
 
-TEST_F(Channel_Tests, DISABLED_MultiThread_ReceiveFromThread_ResetOnReceive) // deadlock
+TEST(Channel_Tests, MultiThread_ReceiveFromThread_ResetOnReceive)
 {
     Asyncable asyncable;
     Channel<int> ch;
