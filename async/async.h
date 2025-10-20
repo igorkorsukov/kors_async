@@ -46,6 +46,10 @@ private:
 
         void connect(Asyncable* a)
         {
+            if (!a) {
+                return;
+            }
+
             if (isConnected(a)) {
                 return;
             }
@@ -102,7 +106,11 @@ private:
         m_queues.push_back(d);
 
         d->queue.port2()->onMessage([d](const CallMsg& m) {
-            if (d->isConnected(m.receiver)) {
+            if (m.receiver) {
+                if (d->isConnected(m.receiver)) {
+                    m.func(nullptr);
+                }
+            } else {
                 m.func(nullptr);
             }
         });

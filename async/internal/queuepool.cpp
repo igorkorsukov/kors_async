@@ -49,30 +49,10 @@ QueuePool::~QueuePool()
 
 QueuePool::ThreadData* QueuePool::threadData(const std::thread::id& threadId, bool create)
 {
-    size_t count = create ? m_threads.size() : m_count.load();
+    size_t count = m_count.load();
     assert(count <= m_threads.size());
     for (size_t i = 0; i < count; ++i) {
         ThreadData* thdata = m_threads.at(i);
-        // new slot
-        if (!thdata) {
-            if (!create) {
-                return nullptr;
-            }
-
-            std::scoped_lock lock(m_mutex);
-            thdata = m_threads.at(i);
-            if (thdata) {
-                // someone managed to take it
-                // will try to again
-                return nullptr;
-            }
-
-            thdata = new ThreadData();
-            thdata->threadId = threadId;
-            m_threads[i] = thdata;
-            ++m_count;
-            return thdata;
-        } else
         // found a slot for the given thread
         if (thdata->threadId == threadId) {
             return thdata;
@@ -80,7 +60,7 @@ QueuePool::ThreadData* QueuePool::threadData(const std::thread::id& threadId, bo
     }
 
     if (create) {
-        // we didn't find ThreadData and there's no empty slot, let's try
+        // we didn't find ThreadData, let's try
         // found a slot that has no ports (unregistered)
         count = m_count.load();
         assert(count <= m_threads.size());
@@ -88,6 +68,27 @@ QueuePool::ThreadData* QueuePool::threadData(const std::thread::id& threadId, bo
             ThreadData* thdata = m_threads.at(i);
             if (thdata->ports.empty()) {
                 thdata->threadId = threadId;
+                return thdata;
+            }
+        }
+
+        // we didn't find ThreadData, let's try found a empty slot
+        for (size_t i = count; i < m_threads.size(); ++i) {
+            ThreadData* thdata = m_threads.at(i);
+            // new slot
+            if (!thdata) {
+                std::scoped_lock lock(m_mutex);
+                thdata = m_threads.at(i);
+                if (thdata) {
+                    // someone managed to take it
+                    // will try to again
+                    return nullptr;
+                }
+
+                thdata = new ThreadData();
+                thdata->threadId = threadId;
+                m_threads[i] = thdata;
+                ++m_count;
                 return thdata;
             }
         }

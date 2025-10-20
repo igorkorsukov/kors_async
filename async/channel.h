@@ -70,13 +70,13 @@ public:
         m_data->mainCh.send(SendMode::Auto, args ...);
     }
 
-    void onReceive(const Asyncable* receiver, const Callback& f)
+    void onReceive(const Asyncable* receiver, const Callback& f, Asyncable::Mode mode = Asyncable::Mode::SetOnce)
     {
-        m_data->mainCh.onReceive(receiver, f);
+        m_data->mainCh.onReceive(receiver, f, mode);
     }
 
     template<typename Func>
-    void onReceive(const Asyncable* receiver, Func f)
+    void onReceive(const Asyncable* receiver, Func f, Asyncable::Mode mode = Asyncable::Mode::SetOnce)
     {
         Callback callback = [f](const T&... args) {
             f(args ...);
@@ -94,7 +94,7 @@ public:
                 m_data->disconnectCh = std::make_unique<ChannelImpl<const Asyncable*> >();
                 m_data->disconnectCh->onReceive(nullptr, [this](const Asyncable* a) {
                     disconnect(a);
-                });
+                }, Asyncable::Mode::SetOnce);
             }
 
             m_data->disconnectCh->send(SendMode::Queue, a);
@@ -113,21 +113,21 @@ public:
         }
     }
 
-    void onClose(const Asyncable* receiver, const std::function<void()>& f)
+    void onClose(const Asyncable* receiver, const std::function<void()>& f, Asyncable::Mode mode = Asyncable::Mode::SetOnce)
     {
         if (!m_data->closeCh) {
             m_data->closeCh = std::make_unique<ChannelImpl<> >();
         }
-        m_data->closeCh->onReceive(receiver, f);
+        m_data->closeCh->onReceive(receiver, f, mode);
     }
 
     template<typename Func>
-    void onClose(const Asyncable* receiver, Func f)
+    void onClose(const Asyncable* receiver, Func f, Asyncable::Mode mode = Asyncable::Mode::SetOnce)
     {
         std::function<void()> callback = [f]() {
             f();
         };
-        onClose(receiver, callback);
+        onClose(receiver, callback, mode);
     }
 
     bool isConnected() const
