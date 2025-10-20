@@ -85,8 +85,10 @@ public:
 
     void disconnect(const Asyncable* a)
     {
-        const std::thread::id& connectThId = a->async_connectThread(&m_data->mainCh);
-        m_data->mainCh.disconnectReceiver(a, connectThId);
+        m_data->mainCh.disconnect(a);
+        if (m_data->closeCh) {
+            m_data->closeCh->disconnect(a);
+        }
     }
 
     void resetOnReceive(const Asyncable* a)

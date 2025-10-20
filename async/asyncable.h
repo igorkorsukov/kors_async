@@ -88,14 +88,12 @@ public:
 
     void async_disconnect(IConnectable* c)
     {
-        const std::thread::id threadId = std::this_thread::get_id();
         std::scoped_lock lock(m_async_mutex);
         auto it = std::find_if(m_async_connects.begin(), m_async_connects.end(), [c](const ConnectData& d) {
             return d.connection == c;
         });
 
         if (it != m_async_connects.end()) {
-            assert(it->threadId == threadId && "disconnect in a different thread than connect");
             m_async_connects.erase(it);
         }
     }
