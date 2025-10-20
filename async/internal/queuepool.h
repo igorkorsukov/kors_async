@@ -65,7 +65,13 @@ private:
         std::thread::id threadId;
         std::vector<std::shared_ptr<Port> > ports;
         std::atomic<bool> locked = false;
+
+        bool tryLock();
+        void lock();
+        void unlock();
     };
+
+    ThreadData* threadData(const std::thread::id& threadId, bool create);
 
     std::mutex m_mutex;
     std::vector<ThreadData*> m_threads;
