@@ -180,7 +180,7 @@ public:
 
     Promise<T...>& onResolve(const Asyncable* receiver, const std::function<void(const T&...)>& callback)
     {
-        m_data->resolveCh.onReceive(receiver, callback);
+        m_data->resolveCh.onReceive(receiver, callback, Asyncable::Mode::SetOnce);
         return *this;
     }
 
@@ -197,7 +197,7 @@ public:
     {
         assert(m_data->has_reject && "This promise has no rejection");
         if (m_data->rejectCh) {
-            m_data->rejectCh->onReceive(receiver, callback);
+            m_data->rejectCh->onReceive(receiver, callback, Asyncable::Mode::SetOnce);
         }
         return *this;
     }

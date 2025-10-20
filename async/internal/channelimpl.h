@@ -269,21 +269,40 @@ public:
         return thdata.receiversIteration;
     }
 
-    void onReceive(const Asyncable* receiver, const Callback& f)
+    void onReceive(const Asyncable* receiver, const Callback& f, Asyncable::Mode mode)
     {
         const std::thread::id thisThId = std::this_thread::get_id();
         ThreadData& thdata = threadData(thisThId);
 
-        Receiver* r = new Receiver();
-        r->receiver = const_cast<Asyncable*>(receiver);
-        if (r->receiver) {
-            r->receiver->async_connect(this);
+        Receiver* r = nullptr;
+        if (receiver) {
+            auto it = findReceiver(thdata.receivers, receiver);
+            if (it != thdata.receivers.end()) {
+                r = *it;
+            }
+
+            if (r) {
+                assert(mode != Asyncable::Mode::SetOnce && "callback is already setted");
+                if (mode == Asyncable::Mode::SetOnce) {
+                    return;
+                }
+            }
         }
-        r->callback = f;
 
-        thdata.receivers.push_back(r);
-
-        ++m_enabledReceiversCount;
+        if (r) {
+            // replace
+            r->callback = f;
+        } else {
+            // new
+            r = new Receiver();
+            r->receiver = const_cast<Asyncable*>(receiver);
+            if (r->receiver) {
+                r->receiver->async_connect(this);
+            }
+            r->callback = f;
+            thdata.receivers.push_back(r);
+            ++m_enabledReceiversCount;
+        }
     }
 
     bool disconnectReceiver(const Asyncable* a, const std::thread::id& connectThId)

@@ -61,9 +61,9 @@ public:
         m_ch->send();
     }
 
-    void onReceive(const Asyncable* receiver, const Callback& f)
+    void onNotify(const Asyncable* receiver, const Callback& f, Asyncable::Mode mode = Asyncable::Mode::SetOnce)
     {
-        m_ch->onReceive(receiver, f);
+        m_ch->onReceive(receiver, f, mode);
     }
 
     template<typename Func>
@@ -72,7 +72,7 @@ public:
         Callback callback = [f]() {
             f();
         };
-        onReceive(receiver, callback);
+        onNotify(receiver, callback, mode);
     }
 
     void resetOnNotify(const Asyncable* receiver)
@@ -85,9 +85,9 @@ public:
         m_ch->close();
     }
 
-    void onClose(const Asyncable* receiver, const std::function<void()>& f)
+    void onClose(const Asyncable* receiver, const std::function<void()>& f, Asyncable::Mode mode = Asyncable::Mode::SetOnce)
     {
-        m_ch->onClose(receiver, f);
+        m_ch->onClose(receiver, f, mode);
     }
 
     template<typename Func>
