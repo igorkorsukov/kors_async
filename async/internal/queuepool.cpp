@@ -23,6 +23,7 @@ SOFTWARE.
 */
 
 #include <algorithm>
+#include <chrono>
 
 #include "../conf.h"
 #include "queuepool.h"
@@ -46,65 +47,125 @@ QueuePool::~QueuePool()
     }
 }
 
-void QueuePool::regPort(const std::thread::id& th, const std::shared_ptr<Port>& port)
+QueuePool::ThreadData* QueuePool::threadData(const std::thread::id& threadId, bool create)
 {
-    bool found = false;
-    for (size_t i = 0; i < m_threads.size(); ++i) {
+    size_t count = create ? m_threads.size() : m_count.load();
+    assert(count <= m_threads.size());
+    for (size_t i = 0; i < count; ++i) {
         ThreadData* thdata = m_threads.at(i);
         // new slot
         if (!thdata) {
+            if (!create) {
+                return nullptr;
+            }
+
             std::scoped_lock lock(m_mutex);
             thdata = m_threads.at(i);
             if (thdata) {
                 // someone managed to take it
-                // will try to register again
-                regPort(th, port);
-                return;
+                // will try to again
+                return nullptr;
             }
 
             thdata = new ThreadData();
-            thdata->threadId = th;
-            thdata->ports.push_back(port);
+            thdata->threadId = threadId;
             m_threads[i] = thdata;
             ++m_count;
-            found = true;
-            break;
+            return thdata;
         } else
         // found a slot for the given thread
-        if (thdata->threadId == th) {
-            thdata->locked = true;
-            thdata->ports.push_back(port);
-            thdata->locked = false;
-            found = true;
-            break;
-        } else
-        // found a slot that has no ports (unregistered)
-        if (thdata->ports.empty()) {
-            thdata->locked = true;
-            thdata->threadId = th;
-            thdata->ports.push_back(port);
-            thdata->locked = false;
-            found = true;
-            break;
+        if (thdata->threadId == threadId) {
+            return thdata;
         }
     }
 
-    assert(found && "thread pool exhausted");
+    if (create) {
+        // we didn't find ThreadData and there's no empty slot, let's try
+        // found a slot that has no ports (unregistered)
+        count = m_count.load();
+        assert(count <= m_threads.size());
+        for (size_t i = 0; i < count; ++i) {
+            ThreadData* thdata = m_threads.at(i);
+            if (thdata->ports.empty()) {
+                thdata->threadId = threadId;
+                return thdata;
+            }
+        }
+
+        bool found = false;
+        assert(found && "thread pool exhausted");
+    }
+
+    return nullptr;
+}
+
+bool QueuePool::ThreadData::tryLock()
+{
+    // try lock
+    bool expected = false;
+    if (!locked.compare_exchange_weak(expected, true)) {
+        return true;
+    }
+    return false;
+}
+
+void QueuePool::ThreadData::lock()
+{
+    bool expected = false;
+    while (locked.compare_exchange_weak(expected, true)) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
+
+void QueuePool::ThreadData::unlock()
+{
+    locked.store(false);
+}
+
+void QueuePool::regPort(const std::thread::id& th, const std::shared_ptr<Port>& port)
+{
+    ThreadData* thdata = nullptr;
+    int iteration = 0;
+    while (iteration < 100) {
+        ++iteration;
+        thdata = threadData(th, true);
+        if (!thdata) {
+            // trying to get ThreadData
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            continue;
+        }
+    }
+
+    assert(thdata && "thread pool exhausted");
+    if (!thdata) {
+        return;
+    }
+
+    // lock
+    thdata->lock();
+
+    thdata->ports.push_back(port);
+
+    // unlock
+    thdata->unlock();
 }
 
 void QueuePool::unregPort(const std::thread::id& th, const std::shared_ptr<Port>& port)
 {
-    for (size_t i = 0; i < m_threads.size(); ++i) {
-        ThreadData* thdata = m_threads.at(i);
-        if (!thdata) {
-            break;
-        } else if (thdata->threadId == th) {
-            thdata->locked = true;
-            auto& ports = thdata->ports;
-            ports.erase(std::remove(ports.begin(), ports.end(), port), ports.end());
-            thdata->locked = false;
-        }
+    ThreadData* thdata = threadData(th, false);
+    assert(thdata);
+    if (!thdata) {
+        return;
     }
+
+    // lock
+    thdata->lock();
+
+    auto& ports = thdata->ports;
+    ports.erase(std::remove(ports.begin(), ports.end(), port), ports.end());
+
+    // unlock
+    thdata->unlock();
 }
 
 void QueuePool::processMessages()
@@ -115,22 +176,22 @@ void QueuePool::processMessages()
 
 void QueuePool::processMessages(const std::thread::id& th)
 {
-    size_t count = m_count.load();
-    assert(count <= m_threads.size());
-    for (size_t i = 0; i < count; ++i) {
-        ThreadData* thdata = m_threads.at(i);
-        assert(thdata);
-        if (!thdata) {
-            break;
-        } else if (thdata->threadId == th) {
-            if (thdata->locked) {
-                break;
-            }
-            for (auto& p : thdata->ports) {
-                p->process();
-            }
-            break;
-        }
+    ThreadData* thdata = threadData(th, false);
+    if (!thdata) {
+        return;
     }
+
+    // try lock
+    if (thdata->tryLock()) {
+        // if we couldn't lock it, we just skip it
+        return;
+    }
+
+    for (auto& p : thdata->ports) {
+        p->process();
+    }
+
+    // unlock
+    thdata->unlock();
 }
 } // kors::async
