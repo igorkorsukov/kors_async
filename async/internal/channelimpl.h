@@ -84,7 +84,7 @@ private:
 
         inline bool addReceiver(const Asyncable* receiver, const Callback& f, Asyncable::Mode mode, Asyncable::IConnectable* conn)
         {
-            bool needDecrement = false;
+            bool needIncrement = false;
             Receiver* r = nullptr;
             if (receiver) {
                 auto it = findByAsyncable(receivers, receiver);
@@ -103,7 +103,7 @@ private:
                 if (r) {
                     assert(mode != Asyncable::Mode::SetOnce && "callback is already setted");
                     if (mode == Asyncable::Mode::SetOnce) {
-                        return needDecrement;
+                        return needIncrement;
                     }
                 }
             }
@@ -120,24 +120,24 @@ private:
                 }
                 r->callback = f;
                 pendingToAdd.push_back(r);
-                needDecrement = true;
+                needIncrement = true;
             }
-            return needDecrement;
+            return needIncrement;
         }
 
         inline bool removeReceiver(const Asyncable* a)
         {
-            bool needIncrement = false;
+            bool needDecrement = false;
             auto it = findByAsyncable(receivers, a);
             if (it != receivers.end()) {
                 Receiver* r = *it;
                 if (r->enabled) {
                     r->enabled = false;
-                    needIncrement = true;
+                    needDecrement = true;
+                    pendingToRemove.push_back(r);
                 }
-                pendingToRemove.push_back(r);
             }
-            return needIncrement;
+            return needDecrement;
         }
 
         inline void receiversCall(const T&... args)
@@ -238,7 +238,7 @@ private:
     // IConnectable
     void disconnectAsyncable(Asyncable* a, const std::thread::id& connectThId) override
     {
-        disconnectReceiver(a, connectThId);
+        disconnect(a, connectThId);
     }
 
     void sendToQueue(ThreadData& sendThdata, const std::thread::id& receiveTh, const CallMsg& msg)
@@ -385,34 +385,60 @@ public:
     {
         const std::thread::id thisThId = std::this_thread::get_id();
         ThreadData& thdata = threadData(thisThId);
-        bool needDecrement = thdata.addReceiver(receiver, f, mode, this);
-        if (needDecrement) {
+        bool needIncrement = thdata.addReceiver(receiver, f, mode, this);
+        if (needIncrement) {
             ++m_enabledReceiversCount;
         }
     }
 
-    bool disconnectReceiver(const Asyncable* a, const std::thread::id& connectThId)
+    void disconnect(const Asyncable* a)
+    {
+        assert(a);
+        if (a) {
+            disconnect(a, a->async_connectThread(this));
+        }
+    }
+
+    void disconnect(const Asyncable* a, const std::thread::id& connectThId)
     {
         assert(a);
         if (!a) {
-            return false;
-        }
-
-        const std::thread::id thisThId = std::this_thread::get_id();
-        assert(connectThId == thisThId);
-        if (!(connectThId == thisThId)) {
-            return false;
-        }
-
-        ThreadData& thdata = threadData(thisThId);
-        bool needIncrement = thdata.removeReceiver(a);
-        if (needIncrement) {
-            --m_enabledReceiversCount;
-            assert(m_enabledReceiversCount.load() >= 0);
+            return;
         }
 
         const_cast<Asyncable*>(a)->async_disconnect(this);
-        return true;
+
+        const std::thread::id thisThId = std::this_thread::get_id();
+
+        auto removeReceiver = [this, a]() {
+            const std::thread::id thisThId = std::this_thread::get_id();
+            ThreadData& thdata = threadData(thisThId);
+            bool needDecrement = thdata.removeReceiver(a);
+            if (needDecrement) {
+                --m_enabledReceiversCount;
+                assert(m_enabledReceiversCount.load() >= 0);
+            }
+        };
+
+        if (connectThId == thisThId) {
+            removeReceiver();
+        } else {
+            // to unsubscribe, we need to execute the receiver
+            // removing code in the thread to which we subscribed.
+            // let's send a message to this thread with a remove function.
+            // the message callback will be called for all receivers,
+            // but we need it to be called only once,
+            // so we'll call it only for the receiver we need.
+            CallMsg msg;
+            msg.func = [a, removeReceiver](const void* r) {
+                if (reinterpret_cast<const Receiver*>(r)->receiver == a) {
+                    removeReceiver();
+                }
+            };
+
+            ThreadData& sendThdata = threadData(thisThId);
+            sendToQueue(sendThdata, connectThId, msg);
+        }
     }
 
     bool isReceiverConnected(const Asyncable* a, const std::thread::id& connectThId) const

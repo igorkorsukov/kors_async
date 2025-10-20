@@ -66,10 +66,17 @@ QueuePool::ThreadData* QueuePool::threadData(const std::thread::id& threadId, bo
         assert(count <= m_threads.size());
         for (size_t i = 0; i < count; ++i) {
             ThreadData* thdata = m_threads.at(i);
+            if (!thdata->tryLock()) {
+                continue;
+            }
+
             if (thdata->ports.empty()) {
                 thdata->threadId = threadId;
+                thdata->unlock();
                 return thdata;
             }
+
+            thdata->unlock();
         }
 
         // we didn't find ThreadData, let's try found a empty slot
@@ -102,9 +109,8 @@ QueuePool::ThreadData* QueuePool::threadData(const std::thread::id& threadId, bo
 
 bool QueuePool::ThreadData::tryLock()
 {
-    // try lock
     bool expected = false;
-    if (!locked.compare_exchange_weak(expected, true)) {
+    if (locked.compare_exchange_weak(expected, true)) {
         return true;
     }
     return false;
@@ -113,7 +119,7 @@ bool QueuePool::ThreadData::tryLock()
 void QueuePool::ThreadData::lock()
 {
     bool expected = false;
-    while (locked.compare_exchange_weak(expected, true)) {
+    while (!locked.compare_exchange_weak(expected, true)) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
@@ -130,11 +136,11 @@ void QueuePool::regPort(const std::thread::id& th, const std::shared_ptr<Port>& 
     while (iteration < 100) {
         ++iteration;
         thdata = threadData(th, true);
-        if (!thdata) {
-            // trying to get ThreadData
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            continue;
+        if (thdata) {
+            break;
         }
+        // trying to get ThreadData again
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     assert(thdata && "thread pool exhausted");
@@ -183,7 +189,7 @@ void QueuePool::processMessages(const std::thread::id& th)
     }
 
     // try lock
-    if (thdata->tryLock()) {
+    if (!thdata->tryLock()) {
         // if we couldn't lock it, we just skip it
         return;
     }

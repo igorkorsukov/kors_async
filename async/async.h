@@ -84,11 +84,13 @@ private:
     ~Async()
     {
         for (QueueData* d : m_queues) {
+            QueuePool::instance()->unregPort(d->sendTh, d->queue.port1());           // send
+            QueuePool::instance()->unregPort(d->receiveTh, d->queue.port2());        // receive
             delete d;
         }
     }
 
-    QueueData* queueData(const std::thread::id& sendTh, const std::thread::id& receiveTh, bool create)
+    QueueData* queueData(const std::thread::id& sendTh, const std::thread::id& receiveTh)
     {
         std::scoped_lock lock(m_mutex);
         for (QueueData* d : m_queues) {
@@ -97,9 +99,6 @@ private:
             }
         }
 
-        if (!create) {
-            return nullptr;
-        }
         QueueData* d = new QueueData();
         d->sendTh = sendTh;
         d->receiveTh = receiveTh;
@@ -132,7 +131,7 @@ private:
         };
 
         const std::thread::id sendTh = std::this_thread::get_id();
-        QueueData* qdata = inctance()->queueData(sendTh, th, true);
+        QueueData* qdata = instance()->queueData(sendTh, th);
         assert(qdata);
         if (!qdata) {
             return;
@@ -144,7 +143,7 @@ private:
 
 public:
 
-    static Async* inctance()
+    static Async* instance()
     {
         static Async a;
         return &a;
@@ -152,7 +151,7 @@ public:
 
     static void call(const Asyncable* caller, const Call& func, const std::thread::id& th = std::this_thread::get_id())
     {
-        inctance()->callQueue(caller, func, th);
+        instance()->callQueue(caller, func, th);
     }
 
     template<typename F>
