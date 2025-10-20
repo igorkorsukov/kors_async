@@ -46,7 +46,7 @@ public:
 
     struct IConnectable {
         virtual ~IConnectable() = default;
-        virtual void disconnectAsyncable(Asyncable* a) = 0;
+        virtual void disconnectAsyncable(Asyncable* a, const std::thread::id& connectThId) = 0;
     };
 
     bool async_isConnected() const
@@ -105,16 +105,11 @@ public:
         std::set<ConnectData> copy;
         {
             std::scoped_lock lock(m_async_mutex);
-            copy = m_async_connects;
+            m_async_connects.swap(copy);
         }
 
         for (const ConnectData& d : copy) {
-            d.connection->disconnectAsyncable(this);
-        }
-
-        {
-            std::scoped_lock lock(m_async_mutex);
-            m_async_connects.clear();
+            d.connection->disconnectAsyncable(this, d.threadId);
         }
     }
 

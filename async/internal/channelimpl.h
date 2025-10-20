@@ -49,7 +49,6 @@ public:
 private:
 
     struct Receiver {
-        std::thread::id threadId;
         bool enabled = true;
         Asyncable* receiver = nullptr;
         Callback callback;
@@ -64,7 +63,7 @@ private:
 
     struct ThreadData {
         std::thread::id threadId;
-        bool locked = false;
+        bool receiversIteration = false;
         std::vector<Receiver*> receivers;
         std::vector<QueueData*> queues;
     };
@@ -100,16 +99,18 @@ private:
     }
 
     // IConnectable
-    void disconnectAsyncable(Asyncable* a) override
+    void disconnectAsyncable(Asyncable* a, const std::thread::id& connectThId) override
     {
-        bool ok = disconnectReceiver(a);
+        bool ok = disconnectReceiver(a, connectThId);
         if (!ok) {
-            disableReceiver(a);
+            disableReceiver(a, connectThId);
         }
     }
 
     void sendToQueue(ThreadData& sendThdata, const std::thread::id& receiveTh, const CallMsg& msg)
     {
+        assert(sendThdata.threadId == std::this_thread::get_id());
+
         // we are looking queue for the receiver.
         QueueData* qdata = nullptr;
         for (QueueData* qd : sendThdata.queues) {
@@ -126,23 +127,15 @@ private:
             qdata->queue.port2()->onMessage([this](const CallMsg& m) {
                 const std::thread::id threadId = std::this_thread::get_id();
                 ThreadData& thdata = threadData(threadId);
-                thdata.locked = true;
+                thdata.receiversIteration = true;
                 for (const Receiver* r : thdata.receivers) {
                     if (!r->enabled) {
                         continue;
                     }
 
-                    // this can happen when onReceive was called in one thread,
-                    // but another was specified as the calling thread.
-                    if (r->receiver && r->threadId != thdata.threadId) {
-                        // that one might be locked by a mutex, but that's a specific situation
-                        if (!r->receiver->async_isConnected(this)) {
-                            continue;
-                        }
-                    }
                     m.func(r);
                 }
-                thdata.locked = false;
+                thdata.receiversIteration = false;
             });
 
             QueuePool::instance()->regPort(sendThdata.threadId, qdata->queue.port1());  // send
@@ -176,11 +169,13 @@ private:
         ThreadData& sendThdata = threadData(threadId);
 
         // the sender's thread is the same as the receiver's thread
+        sendThdata.receiversIteration = true;
         for (const Receiver* r : sendThdata.receivers) {
             if (r->enabled) {
                 r->callback(args ...);
             }
         }
+        sendThdata.receiversIteration = false;
 
         // we send messages to call in a thread of other receivers
         for (ThreadData* receiveThdata : m_threads) {
@@ -224,7 +219,7 @@ private:
 
 public:
 
-    ChannelImpl(size_t max_threads = MAX_THREADS_PER_CNAHHEL)
+    ChannelImpl(size_t max_threads = MAX_THREADS_PER_CHANNEL)
         : m_threads{max_threads, nullptr} {}
 
     ChannelImpl(const ChannelImpl&) = delete;
@@ -268,19 +263,18 @@ public:
         }
     }
 
-    bool isLocked(const std::thread::id threadId = std::this_thread::get_id()) const
+    bool isInsideIteration(const std::thread::id threadId = std::this_thread::get_id()) const
     {
         ThreadData& thdata = threadData(threadId);
-        return thdata.locked;
+        return thdata.receiversIteration;
     }
 
-    void onReceive(const Asyncable* receiver, const Callback& f, const std::thread::id callThId = std::this_thread::get_id())
+    void onReceive(const Asyncable* receiver, const Callback& f)
     {
-        const std::thread::id receiverThId = std::this_thread::get_id();
-        ThreadData& thdata = threadData(callThId);
+        const std::thread::id thisThId = std::this_thread::get_id();
+        ThreadData& thdata = threadData(thisThId);
 
         Receiver* r = new Receiver();
-        r->threadId = receiverThId;
         r->receiver = const_cast<Asyncable*>(receiver);
         if (r->receiver) {
             r->receiver->async_connect(this);
@@ -292,7 +286,7 @@ public:
         ++m_enabledReceiversCount;
     }
 
-    bool disconnectReceiver(const Asyncable* a)
+    bool disconnectReceiver(const Asyncable* a, const std::thread::id& connectThId)
     {
         assert(a);
         if (!a) {
@@ -300,15 +294,13 @@ public:
         }
 
         const std::thread::id thisThId = std::this_thread::get_id();
-        const std::thread::id& connectThId = a->async_connectThread(this);
-
         assert(connectThId == thisThId);
         if (!(connectThId == thisThId)) {
             return false;
         }
 
         ThreadData& thdata = threadData(thisThId);
-        if (thdata.locked) {
+        if (thdata.receiversIteration) {
             return false;
         }
 
@@ -328,7 +320,7 @@ public:
         return true;
     }
 
-    void disableReceiver(const Asyncable* a)
+    void disableReceiver(const Asyncable* a, const std::thread::id& connectThId)
     {
         assert(a);
         if (!a) {
@@ -336,8 +328,6 @@ public:
         }
 
         const std::thread::id thisThId = std::this_thread::get_id();
-        const std::thread::id& connectThId = a->async_connectThread(this);
-
         assert(connectThId == thisThId);
         if (!(connectThId == thisThId)) {
             return;
@@ -353,7 +343,7 @@ public:
         }
     }
 
-    bool isReceiverConnected(const Asyncable* a) const
+    bool isReceiverConnected(const Asyncable* a, const std::thread::id& connectThId) const
     {
         assert(a);
         if (!a) {
@@ -361,8 +351,6 @@ public:
         }
 
         const std::thread::id thisThId = std::this_thread::get_id();
-        const std::thread::id& connectThId = a->async_connectThread(this);
-
         assert(connectThId == thisThId);
         if (!(connectThId == thisThId)) {
             return false;
