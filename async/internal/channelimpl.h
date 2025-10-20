@@ -64,8 +64,153 @@ private:
     struct ThreadData {
         std::thread::id threadId;
         bool receiversIteration = false;
-        std::vector<Receiver*> receivers;
         std::vector<QueueData*> queues;
+
+        inline void clearAll(Asyncable::IConnectable* conn)
+        {
+            for (Receiver* r : receivers) {
+                if (r->receiver) {
+                    r->receiver->async_disconnect(conn);
+                }
+                delete r;
+            }
+            receivers.clear();
+
+            for (QueueData* qdata : queues) {
+                delete qdata;
+            }
+            queues.clear();
+        }
+
+        inline bool addReceiver(const Asyncable* receiver, const Callback& f, Asyncable::Mode mode, Asyncable::IConnectable* conn)
+        {
+            bool needDecrement = false;
+            Receiver* r = nullptr;
+            if (receiver) {
+                auto it = findByAsyncable(receivers, receiver);
+                if (it != receivers.end()) {
+                    r = *it;
+                }
+
+                if (!r) {
+                    // maybe it was just added and hasn't been moved to the main list yet
+                    auto it = findByAsyncable(pendingToAdd, receiver);
+                    if (it != pendingToAdd.end()) {
+                        r = *it;
+                    }
+                }
+
+                if (r) {
+                    assert(mode != Asyncable::Mode::SetOnce && "callback is already setted");
+                    if (mode == Asyncable::Mode::SetOnce) {
+                        return needDecrement;
+                    }
+                }
+            }
+
+            if (r) {
+                // replace
+                r->callback = f;
+            } else {
+                // new
+                r = new Receiver();
+                r->receiver = const_cast<Asyncable*>(receiver);
+                if (r->receiver) {
+                    r->receiver->async_connect(conn);
+                }
+                r->callback = f;
+                pendingToAdd.push_back(r);
+                needDecrement = true;
+            }
+            return needDecrement;
+        }
+
+        inline bool removeReceiver(const Asyncable* a)
+        {
+            bool needIncrement = false;
+            auto it = findByAsyncable(receivers, a);
+            if (it != receivers.end()) {
+                Receiver* r = *it;
+                if (r->enabled) {
+                    r->enabled = false;
+                    needIncrement = true;
+                }
+                pendingToRemove.push_back(r);
+            }
+            return needIncrement;
+        }
+
+        inline void receiversCall(const T&... args)
+        {
+            addPending();
+            removePending();
+
+            for (const Receiver* r : receivers) {
+                if (r->enabled) {
+                    r->callback(args ...);
+                }
+            }
+
+            // during the execution of the callback,
+            // they can remove and add new receivers,
+            // we will apply them immediately.
+            removePending();
+            addPending();
+        }
+
+        inline void receiversCall(const CallMsg& m)
+        {
+            addPending();
+            removePending();
+
+            for (const Receiver* r : receivers) {
+                if (r->enabled) {
+                    m.func(r);
+                }
+            }
+
+            // during the execution of the callback,
+            // they can remove and add new receivers,
+            // we will apply them immediately.
+            removePending();
+            addPending();
+        }
+
+    private:
+
+        inline void addPending()
+        {
+            for (Receiver* r : pendingToAdd) {
+                receivers.push_back(r);
+            }
+            pendingToAdd.clear();
+        }
+
+        inline void removePending()
+        {
+            for (Receiver* r : pendingToRemove) {
+                auto it = std::find(receivers.begin(), receivers.end(), r);
+                assert(it != receivers.end());
+                if (it != receivers.end()) {
+                    Receiver* r = *it;
+                    delete r;
+                    receivers.erase(it);
+                }
+            }
+            pendingToRemove.clear();
+        }
+
+        inline auto findByAsyncable(const std::vector<Receiver*>& recs, const Asyncable* a) const
+        {
+            auto it = std::find_if(recs.begin(), recs.end(), [a](const Receiver* r) {
+                return a == r->receiver;
+            });
+            return it;
+        }
+
+        std::vector<Receiver*> receivers;
+        std::vector<Receiver*> pendingToAdd;
+        std::vector<Receiver*> pendingToRemove;
     };
 
     std::vector<ThreadData*> m_threads;
@@ -90,21 +235,10 @@ private:
         return dummy;
     }
 
-    inline auto findReceiver(const std::vector<Receiver*>& receivers, const Asyncable* a) const
-    {
-        auto it = std::find_if(receivers.begin(), receivers.end(), [a](const Receiver* r) {
-            return a == r->receiver;
-        });
-        return it;
-    }
-
     // IConnectable
     void disconnectAsyncable(Asyncable* a, const std::thread::id& connectThId) override
     {
-        bool ok = disconnectReceiver(a, connectThId);
-        if (!ok) {
-            disableReceiver(a, connectThId);
-        }
+        disconnectReceiver(a, connectThId);
     }
 
     void sendToQueue(ThreadData& sendThdata, const std::thread::id& receiveTh, const CallMsg& msg)
@@ -127,15 +261,7 @@ private:
             qdata->queue.port2()->onMessage([this](const CallMsg& m) {
                 const std::thread::id threadId = std::this_thread::get_id();
                 ThreadData& thdata = threadData(threadId);
-                thdata.receiversIteration = true;
-                for (const Receiver* r : thdata.receivers) {
-                    if (!r->enabled) {
-                        continue;
-                    }
-
-                    m.func(r);
-                }
-                thdata.receiversIteration = false;
+                thdata.receiversCall(m);
             });
 
             QueuePool::instance()->regPort(sendThdata.threadId, qdata->queue.port1());  // send
@@ -156,6 +282,7 @@ private:
             }
 
             for (QueueData* qdata : thdata->queues) {
+                qdata->queue.port2()->onMessage(nullptr);
                 pool->unregPort(thdata->threadId, qdata->queue.port1()); // send
                 pool->unregPort(qdata->receiveTh, qdata->queue.port2()); // receive
             }
@@ -169,13 +296,7 @@ private:
         ThreadData& sendThdata = threadData(threadId);
 
         // the sender's thread is the same as the receiver's thread
-        sendThdata.receiversIteration = true;
-        for (const Receiver* r : sendThdata.receivers) {
-            if (r->enabled) {
-                r->callback(args ...);
-            }
-        }
-        sendThdata.receiversIteration = false;
+        sendThdata.receiversCall(args ...);
 
         // we send messages to call in a thread of other receivers
         for (ThreadData* receiveThdata : m_threads) {
@@ -234,16 +355,7 @@ public:
                 break;
             }
 
-            for (Receiver* r : thdata->receivers) {
-                if (r->receiver) {
-                    r->receiver->async_disconnect(this);
-                }
-                delete r;
-            }
-
-            for (QueueData* qdata : thdata->queues) {
-                delete qdata;
-            }
+            thdata->clearAll(this);
         }
     }
 
@@ -273,34 +385,8 @@ public:
     {
         const std::thread::id thisThId = std::this_thread::get_id();
         ThreadData& thdata = threadData(thisThId);
-
-        Receiver* r = nullptr;
-        if (receiver) {
-            auto it = findReceiver(thdata.receivers, receiver);
-            if (it != thdata.receivers.end()) {
-                r = *it;
-            }
-
-            if (r) {
-                assert(mode != Asyncable::Mode::SetOnce && "callback is already setted");
-                if (mode == Asyncable::Mode::SetOnce) {
-                    return;
-                }
-            }
-        }
-
-        if (r) {
-            // replace
-            r->callback = f;
-        } else {
-            // new
-            r = new Receiver();
-            r->receiver = const_cast<Asyncable*>(receiver);
-            if (r->receiver) {
-                r->receiver->async_connect(this);
-            }
-            r->callback = f;
-            thdata.receivers.push_back(r);
+        bool needDecrement = thdata.addReceiver(receiver, f, mode, this);
+        if (needDecrement) {
             ++m_enabledReceiversCount;
         }
     }
@@ -319,47 +405,14 @@ public:
         }
 
         ThreadData& thdata = threadData(thisThId);
-        if (thdata.receiversIteration) {
-            return false;
-        }
-
-        // remove receiver
-        auto it = findReceiver(thdata.receivers, a);
-        if (it != thdata.receivers.end()) {
-            Receiver* r = *it;
-            if (r->enabled) {
-                --m_enabledReceiversCount;
-                assert(m_enabledReceiversCount.load() >= 0);
-            }
-            delete r;
-            thdata.receivers.erase(it);
+        bool needIncrement = thdata.removeReceiver(a);
+        if (needIncrement) {
+            --m_enabledReceiversCount;
+            assert(m_enabledReceiversCount.load() >= 0);
         }
 
         const_cast<Asyncable*>(a)->async_disconnect(this);
         return true;
-    }
-
-    void disableReceiver(const Asyncable* a, const std::thread::id& connectThId)
-    {
-        assert(a);
-        if (!a) {
-            return;
-        }
-
-        const std::thread::id thisThId = std::this_thread::get_id();
-        assert(connectThId == thisThId);
-        if (!(connectThId == thisThId)) {
-            return;
-        }
-
-        ThreadData& thdata = threadData(thisThId);
-        auto it = findReceiver(thdata.receivers, a);
-        if (it != thdata.receivers.end()) {
-            Receiver* r = *it;
-            r->enabled = false;
-            --m_enabledReceiversCount;
-            assert(m_enabledReceiversCount.load() >= 0);
-        }
     }
 
     bool isReceiverConnected(const Asyncable* a, const std::thread::id& connectThId) const

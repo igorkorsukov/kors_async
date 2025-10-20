@@ -41,7 +41,6 @@ private:
     struct Data {
         ChannelImpl<T...> mainCh;
         std::unique_ptr<ChannelImpl<> > closeCh;
-        std::unique_ptr<ChannelImpl<const Asyncable*> > disconnectCh;
     };
 
     std::shared_ptr<Data> m_data;
@@ -87,18 +86,7 @@ public:
     void disconnect(const Asyncable* a)
     {
         const std::thread::id& connectThId = a->async_connectThread(&m_data->mainCh);
-        bool ok = m_data->mainCh.disconnectReceiver(a, connectThId);
-        if (!ok) {
-            m_data->mainCh.disableReceiver(a, connectThId);
-            if (!m_data->disconnectCh) {
-                m_data->disconnectCh = std::make_unique<ChannelImpl<const Asyncable*> >();
-                m_data->disconnectCh->onReceive(nullptr, [this](const Asyncable* a) {
-                    disconnect(a);
-                }, Asyncable::Mode::SetOnce);
-            }
-
-            m_data->disconnectCh->send(SendMode::Queue, a);
-        }
+        m_data->mainCh.disconnectReceiver(a, connectThId);
     }
 
     void resetOnReceive(const Asyncable* a)
