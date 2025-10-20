@@ -157,7 +157,7 @@ public:
     template<typename F, typename Arg1>
     static void call(const Asyncable* caller, F f, Arg1 a1, const std::thread::id& th = std::this_thread::get_id())
     {
-        Call c = [f, a1]() { f(a1); };
+        Call c = [f, a1]() mutable { f(a1); };
         Async::call(caller, c, th);
     }
 };

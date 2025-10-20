@@ -34,7 +34,7 @@ class Channel
 {
 public:
 
-    using Callback = typename ChannelImpl<T...>::Callback;
+    using Callback = std::function<void (const T&...)>;
 
 private:
 

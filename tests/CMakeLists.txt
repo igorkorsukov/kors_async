@@ -25,5 +25,6 @@ add_executable(${PROJECT_NAME}
     rpcqueue_tests.cpp
     channel_tests.cpp
     async_tests.cpp
+    promise_tests.cpp
 )
 target_link_libraries(${PROJECT_NAME} gtest_main)
