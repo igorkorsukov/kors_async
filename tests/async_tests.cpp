@@ -143,7 +143,7 @@ TEST(Async_Tests, MultiThread_Call)
 
         // emulate an event loop in the thread
         int iteration = 0;
-        while (iteration < 100) {
+        while (iteration < 1000) {
             ++iteration;
             async::processEvents();
             std::this_thread::sleep_for(std::chrono::milliseconds(1));

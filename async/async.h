@@ -23,35 +23,115 @@ SOFTWARE.
 */
 #pragma once
 
-#include "internal/channelimpl.h"
+#include <functional>
+#include <mutex>
+
+#include "internal/queuepool.h"
 
 namespace kors::async {
 class Async
 {
 private:
     using Call = std::function<void ()>;
-    ChannelImpl<ChannelImpl<Call>*> m_deleter;
 
-    Async()
+    struct QueueData : public Asyncable::IConnectable {
+        std::thread::id sendTh;
+        std::thread::id receiveTh;
+        Queue queue;
+        mutable std::mutex mutex;
+        std::set<Asyncable*> callers;
+
+        QueueData()
+            : queue(QUEUE_CAPACITY) {}
+
+        void connect(Asyncable* a)
+        {
+            if (isConnected(a)) {
+                return;
+            }
+
+            a->async_connect(this);
+
+            std::scoped_lock lock(mutex);
+            callers.insert(a);
+        }
+
+        bool isConnected(Asyncable* a) const
+        {
+            std::scoped_lock lock(mutex);
+            return callers.find(a) != callers.end();
+        }
+
+        void disconnect(Asyncable* a)
+        {
+            std::scoped_lock lock(mutex);
+            callers.erase(a);
+        }
+
+        void disconnectAsyncable(Asyncable* a, const std::thread::id&) override
+        {
+            disconnect(a);
+        }
+    };
+
+    std::mutex m_mutex;
+    std::vector<QueueData*> m_queues;
+
+    ~Async()
     {
-        m_deleter.onReceive(nullptr, [](ChannelImpl<Call>* ch) {
-            delete ch;
+        for (QueueData* d : m_queues) {
+            delete d;
+        }
+    }
+
+    QueueData* queueData(const std::thread::id& sendTh, const std::thread::id& receiveTh, bool create)
+    {
+        std::scoped_lock lock(m_mutex);
+        for (QueueData* d : m_queues) {
+            if (d->sendTh == sendTh && d->receiveTh == receiveTh) {
+                return d;
+            }
+        }
+
+        if (!create) {
+            return nullptr;
+        }
+        QueueData* d = new QueueData();
+        d->sendTh = sendTh;
+        d->receiveTh = receiveTh;
+        m_queues.push_back(d);
+
+        d->queue.port2()->onMessage([d](const CallMsg& m) {
+            if (d->isConnected(m.receiver)) {
+                m.func(nullptr);
+            }
         });
+
+        QueuePool::instance()->regPort(sendTh, d->queue.port1());           // send
+        QueuePool::instance()->regPort(receiveTh, d->queue.port2());        // receive
+
+        return d;
     }
 
-    void deleteLater(ChannelImpl<Call>* ch)
+    void callQueue(const Asyncable* caller_, const Call& func, const std::thread::id& th)
     {
-        m_deleter.send(SendMode::Queue, ch);
-    }
+        Asyncable* caller = const_cast<Asyncable*>(caller_);
 
-    void callQueue(const Asyncable* caller, const Call& func, const std::thread::id& th)
-    {
-        ChannelImpl<Call>* ch = new ChannelImpl<Call>();
-        ch->onReceive(caller, [ch](const Call& func) {
+        CallMsg m;
+        m.receiver = caller;
+        m.func = [func](const void*) {
             func();
-            inctance()->deleteLater(ch);
-        }, th);
-        ch->send(SendMode::Queue, func);
+        };
+
+        const std::thread::id sendTh = std::this_thread::get_id();
+        QueueData* qdata = inctance()->queueData(sendTh, th, true);
+        assert(qdata);
+        if (!qdata) {
+            return;
+        }
+
+        qdata->connect(caller);
+        qdata->queue.port1()->send(m);
     }
 
 public:

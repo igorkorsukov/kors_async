@@ -27,5 +27,5 @@ SOFTWARE.
 
 namespace kors::async {
 inline static size_t MAX_THREADS = 100;
-inline static size_t MAX_THREADS_PER_CNAHHEL = 10;
+inline static size_t MAX_THREADS_PER_CHANNEL = 10;
 }
