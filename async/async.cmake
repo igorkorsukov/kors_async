@@ -7,6 +7,7 @@ set (KORS_ASYNC_SRC
     ${CMAKE_CURRENT_LIST_DIR}/notification.h
     ${CMAKE_CURRENT_LIST_DIR}/async.h
     ${CMAKE_CURRENT_LIST_DIR}/promise.h
+    ${CMAKE_CURRENT_LIST_DIR}/internal/conf.cpp
     ${CMAKE_CURRENT_LIST_DIR}/internal/ringqueue.h
     ${CMAKE_CURRENT_LIST_DIR}/internal/rpcqueue.h
     ${CMAKE_CURRENT_LIST_DIR}/internal/channelimpl.h

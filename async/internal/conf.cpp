@@ -21,13 +21,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-#pragma once
 
-#include <cstddef>
+#include "../conf.h"
 
 namespace kors::async {
-struct conf {
-    static size_t MAX_THREADS;
-    static size_t MAX_THREADS_PER_CHANNEL;
-};
+size_t conf::MAX_THREADS = 100;
+size_t conf::MAX_THREADS_PER_CHANNEL = 10;
 }

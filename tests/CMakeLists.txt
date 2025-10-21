@@ -19,6 +19,10 @@ FetchContent_MakeAvailable(googletest)
 
 include(${CMAKE_CURRENT_LIST_DIR}/../async/async.cmake)
 
+add_compile_options("-fsanitize=address")
+add_compile_options("-fno-omit-frame-pointer")
+add_link_options("-fsanitize=address")
+
 add_executable(${PROJECT_NAME}
     ${KORS_ASYNC_SRC}
     ringqueue_tests.cpp
@@ -28,3 +32,4 @@ add_executable(${PROJECT_NAME}
     promise_tests.cpp
 )
 target_link_libraries(${PROJECT_NAME} gtest_main)
+

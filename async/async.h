@@ -25,6 +25,7 @@ SOFTWARE.
 
 #include <functional>
 #include <mutex>
+#include <type_traits>
 
 #include "internal/queuepool.h"
 
@@ -141,31 +142,41 @@ private:
         qdata->queue.port1()->send(m);
     }
 
+    static inline void do_call(const Asyncable* caller, const Call& func, const std::thread::id& th = std::this_thread::get_id())
+    {
+        instance()->callQueue(caller, func, th);
+    }
+
 public:
 
     static Async* instance()
     {
+        QueuePool::instance();
         static Async a;
         return &a;
     }
 
     static void call(const Asyncable* caller, const Call& func, const std::thread::id& th = std::this_thread::get_id())
     {
-        instance()->callQueue(caller, func, th);
+        do_call(caller, func, th);
     }
 
     template<typename F>
     static void call(const Asyncable* caller, F f, const std::thread::id& th = std::this_thread::get_id())
     {
-        Call c = [f]() { f(); };
-        Async::call(caller, c, th);
+        if constexpr (std::is_convertible_v<F, Call>) {
+            do_call(caller, Call(f), th);
+        } else {
+            Call c = [f]() mutable { f(); };
+            do_call(caller, c, th);
+        }
     }
 
     template<typename F, typename Arg1>
     static void call(const Asyncable* caller, F f, Arg1 a1, const std::thread::id& th = std::this_thread::get_id())
     {
         Call c = [f, a1]() mutable { f(a1); };
-        Async::call(caller, c, th);
+        do_call(caller, c, th);
     }
 };
 }

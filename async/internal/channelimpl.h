@@ -58,7 +58,7 @@ private:
         std::thread::id receiveTh;
         Queue queue;
         QueueData()
-            : queue(QUEUE_CAPACITY) {}
+            : queue(kors::async::QUEUE_CAPACITY) {}
     };
 
     struct ThreadData {
@@ -66,15 +66,21 @@ private:
         bool receiversIteration = false;
         std::vector<QueueData*> queues;
 
-        inline void clearAll(Asyncable::IConnectable* conn)
+        inline void deleteAll(std::vector<Receiver*>& recs, Asyncable::IConnectable* conn) const
         {
-            for (Receiver* r : receivers) {
+            for (Receiver* r : recs) {
                 if (r->receiver) {
                     r->receiver->async_disconnect(conn);
                 }
                 delete r;
             }
-            receivers.clear();
+            recs.clear();
+        }
+
+        inline void clearAll(Asyncable::IConnectable* conn)
+        {
+            deleteAll(receivers, conn);
+            deleteAll(pendingToAdd, conn);
 
             for (QueueData* qdata : queues) {
                 delete qdata;
@@ -128,14 +134,29 @@ private:
         inline bool removeReceiver(const Asyncable* a)
         {
             bool needDecrement = false;
+            Receiver* r = nullptr;
             auto it = findByAsyncable(receivers, a);
             if (it != receivers.end()) {
-                Receiver* r = *it;
-                if (r->enabled) {
-                    r->enabled = false;
-                    needDecrement = true;
-                    pendingToRemove.push_back(r);
+                r = *it;
+            }
+
+            if (!r) {
+                // maybe it was just added and hasn't been moved to the main list yet
+                auto it = findByAsyncable(pendingToAdd, a);
+                if (it != pendingToAdd.end()) {
+                    r = *it;
                 }
+            }
+
+            if (!r) {
+                return needDecrement;
+            }
+
+            if (r->enabled) {
+                r->enabled = false;
+                r->receiver = nullptr; // already disconnected
+                needDecrement = true;
+                pendingToRemove.push_back(r);
             }
             return needDecrement;
         }
@@ -340,7 +361,7 @@ private:
 
 public:
 
-    ChannelImpl(size_t max_threads = MAX_THREADS_PER_CHANNEL)
+    ChannelImpl(size_t max_threads = conf::MAX_THREADS_PER_CHANNEL)
         : m_threads{max_threads, nullptr} {}
 
     ChannelImpl(const ChannelImpl&) = delete;
@@ -356,6 +377,7 @@ public:
             }
 
             thdata->clearAll(this);
+            delete thdata;
         }
     }
 
@@ -399,7 +421,7 @@ public:
         }
     }
 
-    void disconnect(const Asyncable* a, const std::thread::id& connectThId)
+    void disconnect(const Asyncable* a, std::thread::id connectThId)
     {
         assert(a);
         if (!a) {

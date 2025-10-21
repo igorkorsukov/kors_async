@@ -80,7 +80,7 @@ public:
         Callback callback = [f](const T&... args) {
             f(args ...);
         };
-        onReceive(receiver, callback);
+        onReceive(receiver, callback, mode);
     }
 
     void disconnect(const Asyncable* a)

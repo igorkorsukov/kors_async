@@ -36,14 +36,17 @@ QueuePool* QueuePool::instance()
 }
 
 QueuePool::QueuePool()
-    : m_threads{MAX_THREADS, nullptr}
+    : m_threads{conf::MAX_THREADS, nullptr}
 {
 }
 
 QueuePool::~QueuePool()
 {
-    for (ThreadData* td : m_threads) {
-        delete td;
+    for (ThreadData* thdata : m_threads) {
+        if (thdata) {
+            thdata->ports.clear();
+            delete thdata;
+        }
     }
 }
 
@@ -131,6 +134,11 @@ void QueuePool::ThreadData::unlock()
 
 void QueuePool::regPort(const std::thread::id& th, const std::shared_ptr<Port>& port)
 {
+    assert(port);
+    if (!port) {
+        return;
+    }
+
     ThreadData* thdata = nullptr;
     int iteration = 0;
     while (iteration < 100) {
@@ -159,6 +167,11 @@ void QueuePool::regPort(const std::thread::id& th, const std::shared_ptr<Port>& 
 
 void QueuePool::unregPort(const std::thread::id& th, const std::shared_ptr<Port>& port)
 {
+    assert(port);
+    if (!port) {
+        return;
+    }
+
     ThreadData* thdata = threadData(th, false);
     assert(thdata);
     if (!thdata) {
@@ -194,8 +207,9 @@ void QueuePool::processMessages(const std::thread::id& th)
         return;
     }
 
-    for (auto& p : thdata->ports) {
-        p->process();
+    for (size_t i = 0; i < thdata->ports.size(); ++i) {
+        std::shared_ptr<Port>& port = thdata->ports.at(i);
+        port->process();
     }
 
     // unlock
