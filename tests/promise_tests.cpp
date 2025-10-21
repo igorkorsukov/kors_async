@@ -54,3 +54,43 @@ TEST(Promise_Tests, SingleThread_Resolve)
 
     EXPECT_EQ(resolvedVal, 42);
 }
+
+TEST(Promise_Tests, MultiThread_Resolve_TempObj)
+{
+    struct Calculator {
+        Promise<int> calc()
+        {
+            return async::make_promise<int>([](auto resolve) {
+                auto t = std::thread([resolve]() {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    std::cout << "defore resolve " << std::endl;
+                    (void)resolve(42);
+                    std::cout << "after resolve " << std::endl;
+                });
+                t.detach();
+                return Promise<int>::dummy_result();
+            });
+        }
+    };
+
+    int resolvedVal = 0;
+
+    {
+        Calculator c;
+
+        c.calc().onResolve(nullptr, [&resolvedVal](int val) {
+            std::cout << "onResolve val: " << val << std::endl;
+            resolvedVal = val;
+        });
+
+        // emulate an event loop in the main thread
+        int iteration = 0;
+        while (iteration < 100) {
+            ++iteration;
+            async::processEvents();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+
+    EXPECT_EQ(resolvedVal, 42);
+}

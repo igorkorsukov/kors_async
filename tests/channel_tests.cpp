@@ -55,13 +55,30 @@ struct Receiver : public Asyncable {
     void setSender(const Sender* s)
     {
         if (sender) {
-            sender->valueChanged().resetOnReceive(this);
+            sender->valueChanged().disconnect(this);
         }
 
         sender = s;
         if (sender) {
             sender->valueChanged().onReceive(this, [this](const int& val) {
                 value = val;
+            });
+        }
+    }
+
+    int value2 = 0;
+    const Sender* sender2 = nullptr;
+
+    void setSender2(const Sender* s)
+    {
+        if (sender2) {
+            sender2->valueChanged().disconnect(this);
+        }
+
+        sender2 = s;
+        if (sender2) {
+            sender2->valueChanged().onReceive(this, [this](const int& val) {
+                value2 = val;
             });
         }
     }
@@ -117,7 +134,7 @@ TEST(Channel_Tests, SingleThread_Send_Reset)
     sender.increment();
     EXPECT_EQ(receivedVal, 1);
 
-    sender.valueChanged().resetOnReceive(&asyncable);
+    sender.valueChanged().disconnect(&asyncable);
 
     sender.increment();
     EXPECT_EQ(receivedVal, 1);
@@ -162,7 +179,7 @@ TEST(Channel_Tests, SingleThread_Sender_Receiver)
     EXPECT_EQ(receiver.value, 1);
 }
 
-TEST(Channel_Tests, SingleThread_Sender_MultiReceiver)
+TEST(Channel_Tests, SingleThread_MultiReceivers)
 {
     Sender sender;
     Receiver receiver1;
@@ -183,6 +200,33 @@ TEST(Channel_Tests, SingleThread_Sender_MultiReceiver)
     sender.increment();
     EXPECT_EQ(receiver1.value, 1);
     EXPECT_EQ(receiver2.value, 2);
+}
+
+TEST(Channel_Tests, SingleThread_MultiSenders)
+{
+    Receiver receiver;
+    {
+        Sender sender1;
+        Sender sender2;
+
+        receiver.setSender(&sender1);
+        receiver.setSender2(&sender2);
+
+        EXPECT_EQ(receiver.value, 0);
+        EXPECT_EQ(receiver.value2, 0);
+
+        sender1.increment();
+        sender2.increment();
+        EXPECT_EQ(receiver.value, 1);
+        EXPECT_EQ(receiver.value2, 1);
+
+        receiver.setSender(nullptr);
+
+        sender1.increment();
+        sender2.increment();
+        EXPECT_EQ(receiver.value, 1);
+        EXPECT_EQ(receiver.value2, 2);
+    }
 }
 
 TEST(Channel_Tests, SingleThread_AutoDisconect)

@@ -45,7 +45,12 @@ public:
     }
 
     struct IConnectable {
-        virtual ~IConnectable() = default;
+        std::set<Asyncable*> asyncables;
+        virtual ~IConnectable()
+        {
+            assert(asyncables.empty());
+        }
+
         virtual void disconnectAsyncable(Asyncable* a, const std::thread::id& connectThId) = 0;
     };
 
@@ -58,6 +63,11 @@ public:
     bool async_isConnected(IConnectable* c) const
     {
         return async_connectData(c).connection != nullptr;
+    }
+
+    std::thread::id async_connectThread(IConnectable* c) const
+    {
+        return async_connectData(c).threadId;
     }
 
     void async_connect(IConnectable* c)
@@ -79,11 +89,7 @@ public:
         }
 
         m_async_connects.emplace(ConnectData { threadId, c });
-    }
-
-    const std::thread::id& async_connectThread(IConnectable* c) const
-    {
-        return async_connectData(c).threadId;
+        c->asyncables.insert(this);
     }
 
     void async_disconnect(IConnectable* c)
@@ -95,6 +101,7 @@ public:
 
         if (it != m_async_connects.end()) {
             m_async_connects.erase(it);
+            c->asyncables.erase(this);
         }
     }
 
@@ -108,6 +115,7 @@ public:
 
         for (const ConnectData& d : copy) {
             d.connection->disconnectAsyncable(this, d.threadId);
+            d.connection->asyncables.erase(this);
         }
     }
 

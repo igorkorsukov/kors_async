@@ -26,6 +26,7 @@ SOFTWARE.
 #include <memory>
 #include <queue>
 #include <functional>
+#include <cassert>
 
 #include "ringqueue.h"
 
@@ -51,7 +52,11 @@ public:
         m_port2->connect(m_port1);
     }
 
-    ~RpcQueue() = default;
+    ~RpcQueue()
+    {
+        m_port1->connect(nullptr);
+        m_port2->connect(nullptr);
+    }
 
     RpcQueue(const RpcQueue&) = delete;
     RpcQueue& operator=(const RpcQueue&) = delete;
@@ -86,6 +91,8 @@ public:
     {
         // try send pending
         sendPending();
+
+        assert(m_connPort);
 
         // receive messages
         m_buffer.clear();
