@@ -27,7 +27,18 @@ SOFTWARE.
 
 namespace kors::async {
 struct conf {
+    //! Total number of threads in the application
+    //! that can interact through this infrastructure
     static size_t MAX_THREADS;
+
+    //! NOTE The default value for the maximum number of threads
+    //! a single channel instance can communicate in.
+    //! A different value can be specified for a specific channel,
+    //! but no more than MAX_THREADS.
     static size_t MAX_THREADS_PER_CHANNEL;
+
+    //! NOTE The queue capacity, if there are more unprocessed messages,
+    //! they will not be lost, but will be sent to the next process
+    static size_t QUEUE_CAPACITY;
 };
 }

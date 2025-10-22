@@ -24,6 +24,7 @@ SOFTWARE.
 #pragma once
 
 #include <memory>
+#include <type_traits>
 
 #include "asyncable.h"
 #include "internal/channelimpl.h"
@@ -41,13 +42,16 @@ private:
     struct Data {
         ChannelImpl<T...> mainCh;
         std::unique_ptr<ChannelImpl<> > closeCh;
+
+        Data(size_t max_threads)
+            : mainCh(max_threads) {}
     };
 
     std::shared_ptr<Data> m_data;
 
 public:
-    Channel()
-        : m_data(std::make_shared<Data>())
+    Channel(size_t max_threads = conf::MAX_THREADS_PER_CHANNEL)
+        : m_data(std::make_shared<Data>(max_threads))
     {
     }
 
@@ -69,31 +73,17 @@ public:
         m_data->mainCh.send(SendMode::Auto, args ...);
     }
 
-    void onReceive(const Asyncable* receiver, const Callback& f, Asyncable::Mode mode = Asyncable::Mode::SetOnce)
-    {
-        m_data->mainCh.onReceive(receiver, f, mode);
-    }
-
     template<typename Func>
     void onReceive(const Asyncable* receiver, Func f, Asyncable::Mode mode = Asyncable::Mode::SetOnce)
     {
-        Callback callback = [f](const T&... args) {
-            f(args ...);
-        };
-        onReceive(receiver, callback, mode);
-    }
-
-    void disconnect(const Asyncable* a)
-    {
-        m_data->mainCh.disconnect(a);
-        if (m_data->closeCh) {
-            m_data->closeCh->disconnect(a);
+        if constexpr (std::is_convertible_v<Func, Callback>) {
+            m_data->mainCh.onReceive(receiver, f, mode);
+        } else {
+            Callback c = [f](const T&... args) {
+                f(args ...);
+            };
+            m_data->mainCh.onReceive(receiver, c, mode);
         }
-    }
-
-    void resetOnReceive(const Asyncable* a)
-    {
-        disconnect(a);
     }
 
     void close()
@@ -103,26 +93,36 @@ public:
         }
     }
 
-    void onClose(const Asyncable* receiver, const std::function<void()>& f, Asyncable::Mode mode = Asyncable::Mode::SetOnce)
-    {
-        if (!m_data->closeCh) {
-            m_data->closeCh = std::make_unique<ChannelImpl<> >();
-        }
-        m_data->closeCh->onReceive(receiver, f, mode);
-    }
-
     template<typename Func>
     void onClose(const Asyncable* receiver, Func f, Asyncable::Mode mode = Asyncable::Mode::SetOnce)
     {
-        std::function<void()> callback = [f]() {
-            f();
-        };
-        onClose(receiver, callback, mode);
+        if (!m_data->closeCh) {
+            m_data->closeCh = std::make_unique<ChannelImpl<> >(m_data->mainCh.maxThreads());
+        }
+
+        using CloseCall = std::function<void ()>;
+
+        if constexpr (std::is_convertible_v<Func, CloseCall>) {
+            m_data->closeCh->onReceive(receiver, f, mode);
+        } else {
+            CloseCall c = [f]() {
+                f();
+            };
+            m_data->closeCh->onReceive(receiver, c, mode);
+        }
     }
 
     bool isConnected() const
     {
         return m_data->mainCh.isConnected();
+    }
+
+    void disconnect(const Asyncable* a)
+    {
+        m_data->mainCh.disconnect(a);
+        if (m_data->closeCh) {
+            m_data->closeCh->disconnect(a);
+        }
     }
 
     uint64_t key() const { return reinterpret_cast<uint64_t>(m_data.get()); }

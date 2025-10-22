@@ -83,18 +83,15 @@ QueuePool::ThreadData* QueuePool::threadData(const std::thread::id& threadId, bo
         }
 
         // we didn't find ThreadData, let's try found a empty slot
+        // the `m_threads` collection itself doesn't change;
+        // we don't lock it, we only lock a slot in this collection.
+        // therefore, we can iterate over this collection
+        // in other threads without a lock.
+        // `m_thcount` limits the number of iterations (only filled slots).
+        std::scoped_lock lock(m_mutex);
         for (size_t i = count; i < m_threads.size(); ++i) {
             ThreadData* thdata = m_threads.at(i);
-            // new slot
             if (!thdata) {
-                std::scoped_lock lock(m_mutex);
-                thdata = m_threads.at(i);
-                if (thdata) {
-                    // someone managed to take it
-                    // will try to again
-                    return nullptr;
-                }
-
                 thdata = new ThreadData();
                 thdata->threadId = threadId;
                 m_threads[i] = thdata;
@@ -103,8 +100,7 @@ QueuePool::ThreadData* QueuePool::threadData(const std::thread::id& threadId, bo
             }
         }
 
-        bool found = false;
-        assert(found && "thread pool exhausted");
+        assert(false && "thread pool exhausted");
     }
 
     return nullptr;
