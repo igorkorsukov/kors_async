@@ -24,6 +24,7 @@ SOFTWARE.
 #pragma once
 
 #include "internal/queuepool.h"
+#include "conf.h"
 
 namespace kors::async {
 inline void processMessages()
@@ -34,5 +35,10 @@ inline void processMessages()
 inline void processMessages(const std::thread::id& th)
 {
     QueuePool::instance()->processMessages(th);
+}
+
+inline void terminate()
+{
+    conf::terminated = true;
 }
 }

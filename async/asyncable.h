@@ -115,7 +115,13 @@ public:
 
         for (const ConnectData& d : copy) {
             d.connection->disconnectAsyncable(this, d.threadId);
-            d.connection->asyncables.erase(this);
+        }
+
+        {
+            std::scoped_lock lock(m_async_mutex);
+            for (const ConnectData& d : copy) {
+                d.connection->asyncables.erase(this);
+            }
         }
     }
 

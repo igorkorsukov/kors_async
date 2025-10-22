@@ -138,3 +138,47 @@ TEST(Promise_Tests, MultiThread_NoSubscribers)
 
     EXPECT_EQ(c.value, 42);
 }
+
+TEST(Promise_Tests, MultiThread_DestroyUnRecieved)
+{
+    struct Calculator {
+        Promise<int> calc()
+        {
+            return async::make_promise<int>([](auto resolve, auto reject) {
+                auto t = std::thread([resolve, reject]() {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    std::cout << "defore resolve " << std::endl;
+                    (void)resolve(42);
+                    std::cout << "after resolve " << std::endl;
+                    if (false) {
+                        (void)reject(-1, "rejected");
+                    }
+                });
+                t.detach();
+                return Promise<int>::dummy_result();
+            });
+        }
+    };
+
+    int resolvedVal = 0;
+
+    {
+        Calculator c;
+
+        c.calc().onResolve(nullptr, [&resolvedVal](int val) {
+            std::cout << "onResolve val: " << val << std::endl;
+            resolvedVal = val;
+        }).onReject(nullptr, [](int, const std::string&) {});
+
+        // emulate an event loop in the main thread
+        const std::thread::id thisThId = std::this_thread::get_id();
+        int iteration = 100;
+        while (iteration < 100) {
+            ++iteration;
+            async::processMessages(thisThId);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+
+    EXPECT_EQ(resolvedVal, 0);
+}

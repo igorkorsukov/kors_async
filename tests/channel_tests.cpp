@@ -344,3 +344,100 @@ TEST(Channel_Tests, MultiThread_ReceiveFromThread_ResetOnReceive)
 
     EXPECT_EQ(receivedVal, 42);
 }
+
+TEST(Channel_Tests, MultiThread_DestroyUnRecieved)
+{
+    int receivedVal = 0;
+
+    {
+        Asyncable asyncable;
+        Channel<int, int> ch;
+
+        ch.onReceive(&asyncable, [&receivedVal, &ch, &asyncable](const int& val1, const int& val2) {
+            // main thread
+            EXPECT_EQ(val1, 42);
+            EXPECT_EQ(val2, 73);
+        });
+
+        auto t1 = std::thread([](Channel<int, int> ch) {
+            for (int i = 0; i < 1000; ++i) {
+                ch.send(42, 73);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }, ch);
+
+        // emulate an event loop in the main thread
+        const std::thread::id thisThId = std::this_thread::get_id();
+        int iteration = 0;
+        while (iteration < 100) {
+            ++iteration;
+            async::processMessages(thisThId);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+
+        t1.join();
+    }
+
+    EXPECT_EQ(receivedVal, 0);
+}
+
+template<typename ... T>
+struct TestMsg {
+    std::function<void()> func;
+
+    void store(const T&... args)
+    {
+        func = [args ...](){};
+    }
+
+    ~TestMsg()
+    {
+        std::cout << "~TestMsg func: " << (bool)func << std::endl;
+    }
+};
+
+template<typename T>
+struct TestQueue {
+    std::vector<T> msgs;
+
+    TestQueue()
+        : msgs(10) {}
+
+    void push(const T& item)
+    {
+        push_impl(item);
+    }
+
+    template<typename U>
+    void push_impl(U&& item)
+    {
+        msgs[0] = std::forward<U>(item);
+    }
+};
+
+TEST(Channel_Tests, MultiThread_Lamda)
+{
+    {
+        TestQueue<TestMsg<int, int> > q;
+
+        auto t1 = std::thread([&q]() {
+            int val1 = 42;
+            int val2 = 73;
+
+            TestMsg<int, int> msg;
+            msg.store(val1, val2);
+
+            q.push(msg);
+        });
+
+        t1.join();
+
+        std::cout << "after t1.join" << std::endl;
+    }
+}
+
+TEST(Channel_Tests, MultiThread_Void)
+{
+    Channel<> ch;
+    ch.send();
+}
