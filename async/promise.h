@@ -102,8 +102,6 @@ public:
     Promise(BodyResolveReject body, PromiseType type)
         : m_data(std::make_shared<Data>())
     {
-        m_data->hold();
-        m_data->has_reject = true;
         m_data->make_rejectCh();
 
         Resolve res(*this);
@@ -125,8 +123,6 @@ public:
     Promise(BodyResolveReject body, const std::thread::id& th = std::this_thread::get_id())
         : m_data(std::make_shared<Data>())
     {
-        m_data->hold();
-        m_data->has_reject = true;
         m_data->make_rejectCh();
 
         Resolve res(*this);
@@ -140,9 +136,6 @@ public:
     Promise(BodyResolve body, PromiseType type)
         : m_data(std::make_shared<Data>())
     {
-        m_data->hold();
-        m_data->has_reject = false;
-
         Resolve res(*this);
 
         switch (type) {
@@ -161,9 +154,6 @@ public:
     Promise(BodyResolve body, const std::thread::id& th = std::this_thread::get_id())
         : m_data(std::make_shared<Data>())
     {
-        m_data->hold();
-        m_data->has_reject = false;
-
         Resolve res(*this);
 
         Async::call(nullptr, [res](BodyResolve body) mutable {
@@ -174,14 +164,9 @@ public:
     Promise(const Promise& p)
         : m_data(p.m_data) {}
 
-    ~Promise() {}
-
     Promise& operator=(const Promise& p)
     {
         m_data = p.m_data;
-        if (m_data->holder) {
-            m_data->holder = m_data;
-        }
         return *this;
     }
 
@@ -189,8 +174,10 @@ public:
     {
         m_data->resolveCh.onReceive(receiver, [callback](std::shared_ptr<Data> d, const T&... args) {
             callback(args ...);
-            Async::call(nullptr, [](std::shared_ptr<Data> d) {
-                d->unhold();
+            // for some reason, the date is being double deleted.
+            // this is the solution to this problem.
+            Async::call(nullptr, [](std::shared_ptr<Data>) {
+                // noop
             }, d);
         }, Asyncable::Mode::SetOnce);
         return *this;
@@ -198,12 +185,15 @@ public:
 
     Promise<T...>& onReject(const Asyncable* receiver, std::function<void(int, const std::string&)> callback)
     {
-        assert(m_data->has_reject && "This promise has no rejection");
+        bool has_reject = m_data->rejectCh != nullptr;
+        assert(has_reject && "This promise has no rejection");
         if (m_data->rejectCh) {
             m_data->rejectCh->onReceive(receiver, [callback](std::shared_ptr<Data> d, int code, const std::string& msg) {
                 callback(code, msg);
-                Async::call(nullptr, [](std::shared_ptr<Data> d) {
-                    d->unhold();
+                // for some reason, the date is being double deleted.
+                // this is the solution to this problem.
+                Async::call(nullptr, [](std::shared_ptr<Data>) {
+                    // noop
                 }, d);
             }, Asyncable::Mode::SetOnce);
         }
@@ -215,48 +205,30 @@ private:
 
     void resolve(const T& ... args)
     {
-        // a promise is often used as a temporary object,
-        // so let's store it in the message being sent so it arrives.
-        m_data->resolveCh.send(SendMode::Auto, m_data, args ...);
+        if (m_data->resolveCh.isConnected()) {
+            // a promise is often used as a temporary object,
+            // so let's store it in the message being sent so it arrives.
+            m_data->resolveCh.send(SendMode::Auto, m_data, args ...);
+        }
     }
 
     void reject(int code, const std::string& msg)
     {
-        assert(m_data->has_reject && "This promise has no rejection");
+        bool has_reject = m_data->rejectCh != nullptr;
+        assert(has_reject && "This promise has no rejection");
         if (m_data->rejectCh) {
-            // a promise is often used as a temporary object,
-            // so let's store it in the message being sent so it arrives.
-            m_data->rejectCh->send(SendMode::Auto, m_data, code, msg);
+            if (m_data->rejectCh->isConnected()) {
+                // a promise is often used as a temporary object,
+                // so let's store it in the message being sent so it arrives.
+                m_data->rejectCh->send(SendMode::Auto, m_data, code, msg);
+            }
         }
     }
 
-    struct Data;
-
-    // a promise is often used as a temporary object,
-    // so let's store it in the message being sent so it arrives.
-    struct Holder {
-        std::shared_ptr<const Data> data;
-    };
-
-    struct Data : public std::enable_shared_from_this<Data>
+    struct Data
     {
         ChannelImpl<std::shared_ptr<Data>, T...> resolveCh;
-        bool has_reject = false;
         std::unique_ptr<ChannelImpl<std::shared_ptr<Data>, int, std::string>> rejectCh;
-        std::shared_ptr<Holder> holder;
-
-        void hold()
-        {
-            holder = std::make_shared<Holder>();
-            holder->data = std::enable_shared_from_this<Data>::shared_from_this();
-        }
-
-        void unhold()
-        {
-            assert(holder);
-            holder->data = nullptr;
-            holder = nullptr;
-        }
 
         void make_rejectCh()
         {

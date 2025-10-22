@@ -38,9 +38,6 @@ struct CallMsg {
     std::function<void(const void*)> func;
 };
 
-//! NOTE The queue capacity, if there are more unprocessed messages,
-//! they will not be lost, but will be sent to the next process
-inline static const size_t QUEUE_CAPACITY = 16;
 using Queue = RpcQueue<CallMsg>;
 using Port = RpcPort<CallMsg>;
 

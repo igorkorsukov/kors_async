@@ -35,9 +35,4 @@ inline void processMessages(const std::thread::id& th)
 {
     QueuePool::instance()->processMessages(th);
 }
-
-inline void processEvents()
-{
-    processMessages();
-}
 }

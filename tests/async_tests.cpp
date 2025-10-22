@@ -72,10 +72,11 @@ TEST(Async_Tests, SingleThread_Call)
     int calledIteration = -1;
 
     // emulate an event loop in the main thread
+    const std::thread::id thisThId = std::this_thread::get_id();
     int iteration = 0;
     while (iteration < 100) {
         ++iteration;
-        async::processEvents();
+        async::processMessages(thisThId);
 
         if (calledIteration == -1) {
             calledIteration = iteration;
@@ -104,10 +105,11 @@ TEST(Async_Tests, SingleThread_AutoDisconect)
     int calledIteration = -1;
 
     // emulate an event loop in the main thread
+    const std::thread::id thisThId = std::this_thread::get_id();
     int iteration = 0;
     while (iteration < 100) {
         ++iteration;
-        async::processEvents();
+        async::processMessages(thisThId);
 
         Object* obj = new Object();
         if (calledIteration == -1) {
@@ -142,10 +144,11 @@ TEST(Async_Tests, MultiThread_Call)
         THREAD_ID = std::this_thread::get_id();
 
         // emulate an event loop in the thread
+        const std::thread::id thisThId = std::this_thread::get_id();
         int iteration = 0;
         while (iteration < 1000) {
             ++iteration;
-            async::processEvents();
+            async::processMessages(thisThId);
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     });
@@ -173,7 +176,7 @@ TEST(Async_Tests, MultiThread_AutoDisconect)
         int iteration = 0;
         while (iteration < 100) {
             ++iteration;
-            async::processEvents();
+            async::processMessages(THREAD_ID);
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     });

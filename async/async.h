@@ -28,6 +28,7 @@ SOFTWARE.
 #include <type_traits>
 
 #include "internal/queuepool.h"
+#include "conf.h"
 
 namespace kors::async {
 class Async
@@ -43,7 +44,7 @@ private:
         std::set<Asyncable*> callers;
 
         QueueData()
-            : queue(QUEUE_CAPACITY) {}
+            : queue(conf::QUEUE_CAPACITY) {}
 
         void connect(Asyncable* a)
         {
@@ -151,21 +152,18 @@ public:
 
     static Async* instance()
     {
+        // needs to be created earlier
         QueuePool::instance();
+
         static Async a;
         return &a;
     }
 
-    static void call(const Asyncable* caller, const Call& func, const std::thread::id& th = std::this_thread::get_id())
+    template<typename Func>
+    static void call(const Asyncable* caller, Func f, const std::thread::id& th = std::this_thread::get_id())
     {
-        do_call(caller, func, th);
-    }
-
-    template<typename F>
-    static void call(const Asyncable* caller, F f, const std::thread::id& th = std::this_thread::get_id())
-    {
-        if constexpr (std::is_convertible_v<F, Call>) {
-            do_call(caller, Call(f), th);
+        if constexpr (std::is_convertible_v<Func, Call>) {
+            do_call(caller, f, th);
         } else {
             Call c = [f]() mutable { f(); };
             do_call(caller, c, th);

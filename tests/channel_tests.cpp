@@ -149,7 +149,7 @@ TEST(Channel_Tests, SingleThread_Send_Reset_onReceive)
 
     sender.valueChanged().onReceive(&asyncable, [&receivedVal, &sender, &asyncable](const int& v) {
         receivedVal = v;
-        sender.valueChanged().resetOnReceive(&asyncable);
+        sender.valueChanged().disconnect(&asyncable);
     });
 
     EXPECT_EQ(receivedVal, 0);
@@ -261,10 +261,11 @@ TEST(Channel_Tests, MultiThread_SendToThread)
             EXPECT_EQ(v2, 73);
         });
 
+        const std::thread::id thisThId = std::this_thread::get_id();
         int iteration = 0;
         while (iteration < 100) {
             ++iteration;
-            async::processEvents();
+            async::processMessages(thisThId);
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     });
@@ -296,10 +297,11 @@ TEST(Channel_Tests, MultiThread_ReceiveFromThread)
     }, ch);
 
     // emulate an event loop in the main thread
+    const std::thread::id thisThId = std::this_thread::get_id();
     int iteration = 0;
     while (iteration < 100) {
         ++iteration;
-        async::processEvents();
+        async::processMessages(thisThId);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
@@ -318,7 +320,7 @@ TEST(Channel_Tests, MultiThread_ReceiveFromThread_ResetOnReceive)
         // main thread
         EXPECT_EQ(val, 42);
         receivedVal = val;
-        ch.resetOnReceive(&asyncable);
+        ch.disconnect(&asyncable);
     });
 
     auto t1 = std::thread([](Channel<int> ch) {
@@ -330,10 +332,11 @@ TEST(Channel_Tests, MultiThread_ReceiveFromThread_ResetOnReceive)
     }, ch);
 
     // emulate an event loop in the main thread
+    const std::thread::id thisThId = std::this_thread::get_id();
     int iteration = 0;
     while (iteration < 100) {
         ++iteration;
-        async::processEvents();
+        async::processMessages(thisThId);
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 

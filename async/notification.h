@@ -61,23 +61,10 @@ public:
         m_ch->send();
     }
 
-    void onNotify(const Asyncable* receiver, const Callback& f, Asyncable::Mode mode = Asyncable::Mode::SetOnce)
-    {
-        m_ch->onReceive(receiver, f, mode);
-    }
-
     template<typename Func>
     void onNotify(const Asyncable* receiver, Func f, Asyncable::Mode mode = Asyncable::Mode::SetOnce)
     {
-        Callback callback = [f]() {
-            f();
-        };
-        onNotify(receiver, callback, mode);
-    }
-
-    void resetOnNotify(const Asyncable* receiver)
-    {
-        m_ch->disconnect(receiver);
+        m_ch->onReceive(receiver, f, mode);
     }
 
     void close()
@@ -85,23 +72,22 @@ public:
         m_ch->close();
     }
 
-    void onClose(const Asyncable* receiver, const std::function<void()>& f, Asyncable::Mode mode = Asyncable::Mode::SetOnce)
+    template<typename Func>
+    void onClose(const Asyncable* receiver, Func f, Asyncable::Mode mode = Asyncable::Mode::SetOnce)
     {
         m_ch->onClose(receiver, f, mode);
-    }
-
-    template<typename Func>
-    void onClose(const Asyncable* receiver, Func f)
-    {
-        std::function<void()> callback = [f]() {
-            f();
-        };
-        onClose(receiver, callback);
     }
 
     bool isConnected() const
     {
         return m_ch->isConnected();
     }
+
+    void disconnect(const Asyncable* receiver)
+    {
+        m_ch->disconnect(receiver);
+    }
+
+    uint64_t key() const { return m_ch->key(); }
 };
 }

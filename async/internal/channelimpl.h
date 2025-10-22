@@ -29,6 +29,7 @@ SOFTWARE.
 #include <cassert>
 #include <algorithm>
 #include <atomic>
+#include <mutex>
 
 #include "../conf.h"
 #include "../asyncable.h"
@@ -58,12 +59,11 @@ private:
         std::thread::id receiveTh;
         Queue queue;
         QueueData()
-            : queue(kors::async::QUEUE_CAPACITY) {}
+            : queue(conf::QUEUE_CAPACITY) {}
     };
 
     struct ThreadData {
         std::thread::id threadId;
-        bool receiversIteration = false;
         std::vector<QueueData*> queues;
 
         inline void deleteAll(std::vector<Receiver*>& recs, Asyncable::IConnectable* conn) const
@@ -93,9 +93,11 @@ private:
             bool needIncrement = false;
             Receiver* r = nullptr;
             if (receiver) {
-                auto it = findByAsyncable(receivers, receiver);
-                if (it != receivers.end()) {
-                    r = *it;
+                {
+                    auto it = findByAsyncable(receivers, receiver);
+                    if (it != receivers.end()) {
+                        r = *it;
+                    }
                 }
 
                 if (!r) {
@@ -135,9 +137,11 @@ private:
         {
             bool needDecrement = false;
             Receiver* r = nullptr;
-            auto it = findByAsyncable(receivers, a);
-            if (it != receivers.end()) {
-                r = *it;
+            {
+                auto it = findByAsyncable(receivers, a);
+                if (it != receivers.end()) {
+                    r = *it;
+                }
             }
 
             if (!r) {
@@ -201,6 +205,10 @@ private:
 
         inline void addPending()
         {
+            if (pendingToAdd.empty()) {
+                return;
+            }
+
             for (Receiver* r : pendingToAdd) {
                 receivers.push_back(r);
             }
@@ -209,11 +217,14 @@ private:
 
         inline void removePending()
         {
+            if (pendingToRemove.empty()) {
+                return;
+            }
+
             for (Receiver* r : pendingToRemove) {
                 auto it = std::find(receivers.begin(), receivers.end(), r);
                 assert(it != receivers.end());
                 if (it != receivers.end()) {
-                    Receiver* r = *it;
                     delete r;
                     receivers.erase(it);
                 }
@@ -234,20 +245,41 @@ private:
         std::vector<Receiver*> pendingToRemove;
     };
 
+    std::mutex m_thmutex;
+    std::atomic<size_t> m_thcount = 0;
     std::vector<ThreadData*> m_threads;
     std::atomic<int> m_enabledReceiversCount = 0;
 
     ThreadData& threadData(const std::thread::id& thId)
     {
-        for (size_t i = 0; i < m_threads.size(); ++i) {
+        size_t count = m_thcount.load();
+        assert(count <= m_threads.size());
+        for (size_t i = 0; i < count; ++i) {
             ThreadData* thdata = m_threads.at(i);
-            if (!thdata) {
-                thdata = new ThreadData();
-                thdata->threadId = thId;
-                m_threads[i] = thdata;
+            assert(thdata);
+            if (thdata && thdata->threadId == thId) {
                 return *m_threads[i];
-            } else if (thdata->threadId == thId) {
-                return *m_threads[i];
+            }
+        }
+
+        // not found, we will create
+        {
+            // the `m_threads` collection itself doesn't change;
+            // we don't lock it, we only lock a slot in this collection.
+            // therefore, we can iterate over this collection
+            // in other threads without a lock.
+            // `m_thcount` limits the number of iterations (only filled slots).
+            std::scoped_lock lock(m_thmutex);
+            for (size_t i = 0; i < m_threads.size(); ++i) {
+                ThreadData* thdata = m_threads.at(i);
+                if (!thdata) {
+                    // found an empty slot
+                    thdata = new ThreadData();
+                    thdata->threadId = thId;
+                    m_threads[i] = thdata;
+                    ++m_thcount;
+                    return *m_threads[i];
+                }
             }
         }
 
@@ -362,7 +394,7 @@ private:
 public:
 
     ChannelImpl(size_t max_threads = conf::MAX_THREADS_PER_CHANNEL)
-        : m_threads{max_threads, nullptr} {}
+        : m_threads{std::min(max_threads, conf::MAX_THREADS), nullptr} {}
 
     ChannelImpl(const ChannelImpl&) = delete;
     ChannelImpl& operator=(const ChannelImpl&) = delete;
@@ -381,6 +413,8 @@ public:
         }
     }
 
+    size_t maxThreads() const { return m_threads.size(); }
+
     void send(SendMode mode, const T&... args)
     {
         if (!isConnected()) {
@@ -395,12 +429,6 @@ public:
             sendQueue(args ...);
         } break;
         }
-    }
-
-    bool isInsideIteration(const std::thread::id threadId = std::this_thread::get_id()) const
-    {
-        ThreadData& thdata = threadData(threadId);
-        return thdata.receiversIteration;
     }
 
     void onReceive(const Asyncable* receiver, const Callback& f, Asyncable::Mode mode)
