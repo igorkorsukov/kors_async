@@ -88,6 +88,11 @@ private:
         for (QueueData* d : m_queues) {
             QueuePool::instance()->unregPort(d->sendTh, d->queue.port1());           // send
             QueuePool::instance()->unregPort(d->receiveTh, d->queue.port2());        // receive
+
+            for (Asyncable* a : d->callers) {
+                a->async_disconnect(d);
+            }
+
             delete d;
         }
     }
@@ -109,10 +114,10 @@ private:
         d->queue.port2()->onMessage([d](const CallMsg& m) {
             if (m.receiver) {
                 if (d->isConnected(m.receiver)) {
-                    m.func(nullptr);
+                    m.func->call(nullptr);
                 }
             } else {
-                m.func(nullptr);
+                m.func->call(nullptr);
             }
         });
 
@@ -126,11 +131,21 @@ private:
     {
         Asyncable* caller = const_cast<Asyncable*>(caller_);
 
+        struct Func : public ICallable
+        {
+            Call func;
+            Func(const Call& f = nullptr)
+                : func(f) {}
+
+            void call(const void*) override
+            {
+                func();
+            }
+        };
+
         CallMsg m;
         m.receiver = caller;
-        m.func = [func](const void*) {
-            func();
-        };
+        m.func = std::make_shared<Func>(func);
 
         const std::thread::id sendTh = std::this_thread::get_id();
         QueueData* qdata = instance()->queueData(sendTh, th);

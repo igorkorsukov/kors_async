@@ -135,6 +135,12 @@ void QueuePool::regPort(const std::thread::id& th, const std::shared_ptr<Port>& 
         return;
     }
 
+    // the queue is no longer functioning
+    assert(!conf::terminated);
+    if (conf::terminated) {
+        return;
+    }
+
     ThreadData* thdata = nullptr;
     int iteration = 0;
     while (iteration < 100) {
@@ -192,6 +198,8 @@ void QueuePool::processMessages()
 
 void QueuePool::processMessages(const std::thread::id& th)
 {
+    assert(!conf::terminated);
+
     ThreadData* thdata = threadData(th, false);
     if (!thdata) {
         return;

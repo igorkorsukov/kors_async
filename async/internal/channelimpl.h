@@ -190,7 +190,7 @@ private:
 
             for (const Receiver* r : receivers) {
                 if (r->enabled) {
-                    m.func(r);
+                    m.func->call(r);
                 }
             }
 
@@ -328,6 +328,11 @@ private:
 
     void unregAllQueue()
     {
+        // the queue is no longer functioning or may even be destroyed
+        if (conf::terminated) {
+            return;
+        }
+
         QueuePool* pool = QueuePool::instance();
         for (ThreadData* thdata : m_threads) {
             if (!thdata) {
@@ -341,6 +346,20 @@ private:
             }
         }
     }
+
+    struct ReceiverCall : public ICallable
+    {
+        std::tuple<T...> args;
+
+        ReceiverCall() = default;
+        ReceiverCall(const std::tuple<T...>& t)
+            : args(t) {}
+
+        void call(const void* r) override
+        {
+            std::apply(reinterpret_cast<const Receiver*>(r)->callback, args);
+        }
+    };
 
     void sendAuto(const T&... args)
     {
@@ -364,9 +383,7 @@ private:
             }
 
             CallMsg msg;
-            msg.func = [args ...](const void* r) {
-                reinterpret_cast<const Receiver*>(r)->callback(args ...);
-            };
+            msg.func = std::make_shared<ReceiverCall>(std::tuple<T...> { args ... });
             sendToQueue(sendThdata, receiveThdata->threadId, msg);
         }
     }
@@ -384,9 +401,7 @@ private:
             }
 
             CallMsg msg;
-            msg.func = [args ...](const void* r) {
-                reinterpret_cast<const Receiver*>(r)->callback(args ...);
-            };
+            msg.func = std::make_shared<ReceiverCall>(std::tuple<T...> { args ... });
             sendToQueue(sendThdata, receiveThdata->threadId, msg);
         }
     }
@@ -473,18 +488,37 @@ public:
         if (connectThId == thisThId) {
             removeReceiver();
         } else {
+            // the queue is no longer functioning or may even be destroyed
+            if (conf::terminated) {
+                return;
+            }
+
             // to unsubscribe, we need to execute the receiver
             // removing code in the thread to which we subscribed.
             // let's send a message to this thread with a remove function.
             // the message callback will be called for all receivers,
             // but we need it to be called only once,
             // so we'll call it only for the receiver we need.
-            CallMsg msg;
-            msg.func = [a, removeReceiver](const void* r) {
-                if (reinterpret_cast<const Receiver*>(r)->receiver == a) {
-                    removeReceiver();
+
+            struct Remover : public ICallable
+            {
+                const Asyncable* receiver = nullptr;
+                std::function<void()> remove;
+
+                Remover() = default;
+                Remover(const Asyncable* a, const std::function<void()>& r)
+                    : receiver(a), remove(r) {}
+
+                void call(const void* r) override
+                {
+                    if (reinterpret_cast<const Receiver*>(r)->receiver == receiver) {
+                        remove();
+                    }
                 }
             };
+
+            CallMsg msg;
+            msg.func = std::make_shared<Remover>(a, removeReceiver);
 
             ThreadData& sendThdata = threadData(thisThId);
             sendToQueue(sendThdata, connectThId, msg);

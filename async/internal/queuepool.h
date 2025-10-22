@@ -33,9 +33,14 @@ SOFTWARE.
 #include "../asyncable.h"
 
 namespace kors::async {
+struct ICallable {
+    virtual ~ICallable() = default;
+    virtual void call(const void*) = 0;
+};
+
 struct CallMsg {
     Asyncable* receiver = nullptr;
-    std::function<void(const void*)> func;
+    std::shared_ptr<ICallable> func;
 };
 
 using Queue = RpcQueue<CallMsg>;
