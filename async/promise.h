@@ -174,8 +174,8 @@ public:
     {
         m_data->resolveCh.onReceive(receiver, [callback](std::shared_ptr<Data> d, const T&... args) {
             callback(args ...);
-            // for some reason, the date is being double deleted.
-            // this is the solution to this problem.
+            // we are in the Data context,
+            // we need to exit it, and then Data will be deleted.
             Async::call(nullptr, [](std::shared_ptr<Data>) {
                 // noop
             }, d);
@@ -187,11 +187,11 @@ public:
     {
         bool has_reject = m_data->rejectCh != nullptr;
         assert(has_reject && "This promise has no rejection");
-        if (m_data->rejectCh) {
+        if (has_reject) {
             m_data->rejectCh->onReceive(receiver, [callback](std::shared_ptr<Data> d, int code, const std::string& msg) {
                 callback(code, msg);
-                // for some reason, the date is being double deleted.
-                // this is the solution to this problem.
+                // we are in the Data context,
+                // we need to exit it, and then Data will be deleted.
                 Async::call(nullptr, [](std::shared_ptr<Data>) {
                     // noop
                 }, d);
@@ -216,7 +216,7 @@ private:
     {
         bool has_reject = m_data->rejectCh != nullptr;
         assert(has_reject && "This promise has no rejection");
-        if (m_data->rejectCh) {
+        if (has_reject) {
             if (m_data->rejectCh->isConnected()) {
                 // a promise is often used as a temporary object,
                 // so let's store it in the message being sent so it arrives.
