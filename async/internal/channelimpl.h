@@ -248,7 +248,44 @@ private:
         std::vector<Receiver*> pendingToRemove;
     };
 
+    struct ReceiverCall : public ICallable
+    {
+        std::atomic<bool> locked = false;
+        std::tuple<std::decay_t<T>...> args;
+
+        ReceiverCall(bool lock = false)
+            : locked(lock) {}
+
+        void setArgs(const T&... a)
+        {
+            args = std::make_tuple(a ...);
+        }
+
+        bool tryLock() override
+        {
+            bool expected = false;
+            if (locked.compare_exchange_weak(expected, true)) {
+                return true;
+            }
+            return false;
+        }
+
+        void unlock() override
+        {
+            args = {};
+            locked.store(false);
+        }
+
+        void call(const void* r) override
+        {
+            std::apply(reinterpret_cast<const Receiver*>(r)->callback, args);
+        }
+    };
+
+    using SharedReceiverCall = std::shared_ptr<ReceiverCall>;
+
     ObjectPool<ThreadData*> m_thdatas;
+    ObjectPool<SharedReceiverCall> m_rcalls;
     std::atomic<int> m_enabledReceiversCount = 0;
 
     ThreadData& threadData(const std::thread::id& thId)
@@ -266,6 +303,23 @@ private:
         static std::thread::id dummyId;
         static ThreadData dummy(dummyId);
         return dummy;
+    }
+
+    SharedReceiverCall lockedReceiverCall()
+    {
+        SharedReceiverCall rcall = m_rcalls.tryGet(
+            //if we were able to lock it, then we found what we needed.
+            [](SharedReceiverCall& c) { return c->tryLock(); },
+            // if we need to create, then we create an already locked one
+            [] () { return std::make_shared<ReceiverCall>(true); }
+            );
+
+        if (!rcall) {
+            // if the pool is full, no problem, we'll create a new one and it will be deleted after use.
+            rcall = std::make_shared<ReceiverCall>(true);
+        }
+
+        return rcall;
     }
 
     // IConnectable
@@ -295,6 +349,7 @@ private:
                 const std::thread::id threadId = std::this_thread::get_id();
                 ThreadData& thdata = threadData(threadId);
                 thdata.receiversCall(m);
+                m.func->unlock();
             });
 
             QueuePool::instance()->regPort(sendThdata.threadId, qdata->queue.port1());  // send
@@ -329,20 +384,6 @@ private:
         }
     }
 
-    struct ReceiverCall : public ICallable
-    {
-        std::tuple<T...> args;
-
-        ReceiverCall() = default;
-        ReceiverCall(const std::tuple<T...>& t)
-            : args(t) {}
-
-        void call(const void* r) override
-        {
-            std::apply(reinterpret_cast<const Receiver*>(r)->callback, args);
-        }
-    };
-
     void sendAuto(const T&... args)
     {
         const std::thread::id threadId = std::this_thread::get_id();
@@ -365,8 +406,11 @@ private:
                 continue;
             }
 
+            auto rcall = lockedReceiverCall();
+            rcall->setArgs(args ...);
+
             CallMsg msg;
-            msg.func = std::make_shared<ReceiverCall>(std::tuple<T...> { args ... });
+            msg.func = rcall;
             sendToQueue(sendThdata, receiveThdata->threadId, msg);
         }
     }
@@ -384,8 +428,11 @@ private:
                 break;
             }
 
+            auto rcall = lockedReceiverCall();
+            rcall->setArgs(args ...);
+
             CallMsg msg;
-            msg.func = std::make_shared<ReceiverCall>(std::tuple<T...> { args ... });
+            msg.func = rcall;
             sendToQueue(sendThdata, receiveThdata->threadId, msg);
         }
     }
@@ -393,7 +440,8 @@ private:
 public:
 
     ChannelImpl(size_t max_threads = conf::MAX_THREADS_PER_CHANNEL)
-        : m_thdatas(std::min(max_threads, conf::MAX_THREADS)) {}
+        : m_thdatas(std::min(max_threads, conf::MAX_THREADS))
+        , m_rcalls(conf::QUEUE_CAPACITY) {}
 
     ChannelImpl(const ChannelImpl&) = delete;
     ChannelImpl& operator=(const ChannelImpl&) = delete;

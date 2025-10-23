@@ -380,3 +380,78 @@ TEST(Channel_Tests, MultiThread_DestroyUnRecieved)
 
     EXPECT_EQ(receivedVal, 0);
 }
+
+TEST(Channel_Tests, SingleThread_ArgTypes)
+{
+    {
+        Channel<int> ch;
+        ch.send(42);
+    }
+
+    {
+        Channel<int, int> ch;
+        ch.send(42, 73);
+    }
+
+    struct Obj
+    {
+        int val = 0;
+    };
+
+    {
+        Channel<Obj> ch;
+        ch.send(Obj());
+    }
+
+    {
+        Channel<Obj*> ch;
+        Obj obj;
+        ch.send(&obj);
+    }
+
+    {
+        Channel<const Obj*> ch;
+        Obj obj;
+        ch.send(&obj);
+    }
+
+    {
+        Channel<const Obj&> ch;
+        Obj obj;
+        ch.send(obj);
+    }
+
+    struct Obj2
+    {
+        int val = 0;
+
+        Obj2(int v)
+            : val(v) {}
+    };
+
+    // there must be a default constructor
+    // {
+    //     Channel<Obj2> ch;
+    //     Obj2 obj(42);
+    //     ch.send(obj);
+    // }
+
+    {
+        Channel<Obj2*> ch;
+        Obj2 obj(42);
+        ch.send(&obj);
+    }
+
+    {
+        Channel<const Obj2*> ch;
+        Obj2 obj(42);
+        ch.send(&obj);
+    }
+
+    // there must be a default constructor
+    // {
+    //     Channel<const Obj2&> ch;
+    //     Obj2 obj(42);
+    //     ch.send(obj);
+    // }
+}

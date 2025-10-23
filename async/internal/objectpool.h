@@ -96,7 +96,6 @@ public:
             }
         }
 
-        assert(false && "objects pool exhausted");
         return nullptr;
     }
 };

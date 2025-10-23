@@ -36,6 +36,8 @@ namespace kors::async {
 struct ICallable {
     virtual ~ICallable() = default;
     virtual void call(const void*) = 0;
+    virtual bool tryLock() { return false; }
+    virtual void unlock() {}
 };
 
 struct CallMsg {
