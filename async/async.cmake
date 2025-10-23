@@ -13,4 +13,5 @@ set (KORS_ASYNC_SRC
     ${CMAKE_CURRENT_LIST_DIR}/internal/channelimpl.h
     ${CMAKE_CURRENT_LIST_DIR}/internal/queuepool.cpp
     ${CMAKE_CURRENT_LIST_DIR}/internal/queuepool.h
+    ${CMAKE_CURRENT_LIST_DIR}/internal/objectpool.h
 )

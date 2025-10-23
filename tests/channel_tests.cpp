@@ -118,7 +118,7 @@ TEST(Channel_Tests, SingleThread_Send_FromObject)
     EXPECT_EQ(receivedVal, 2);
 }
 
-TEST(Channel_Tests, SingleThread_Send_Reset)
+TEST(Channel_Tests, SingleThread_Send_Disconnect)
 {
     Asyncable asyncable;
     Sender sender;
@@ -140,7 +140,7 @@ TEST(Channel_Tests, SingleThread_Send_Reset)
     EXPECT_EQ(receivedVal, 1);
 }
 
-TEST(Channel_Tests, SingleThread_Send_Reset_onReceive)
+TEST(Channel_Tests, SingleThread_Send_onReceive_Disconnect)
 {
     Asyncable asyncable;
     Sender sender;
@@ -379,65 +379,4 @@ TEST(Channel_Tests, MultiThread_DestroyUnRecieved)
     }
 
     EXPECT_EQ(receivedVal, 0);
-}
-
-template<typename ... T>
-struct TestMsg {
-    std::function<void()> func;
-
-    void store(const T&... args)
-    {
-        func = [args ...](){};
-    }
-
-    ~TestMsg()
-    {
-        std::cout << "~TestMsg func: " << (bool)func << std::endl;
-    }
-};
-
-template<typename T>
-struct TestQueue {
-    std::vector<T> msgs;
-
-    TestQueue()
-        : msgs(10) {}
-
-    void push(const T& item)
-    {
-        push_impl(item);
-    }
-
-    template<typename U>
-    void push_impl(U&& item)
-    {
-        msgs[0] = std::forward<U>(item);
-    }
-};
-
-TEST(Channel_Tests, MultiThread_Lamda)
-{
-    {
-        TestQueue<TestMsg<int, int> > q;
-
-        auto t1 = std::thread([&q]() {
-            int val1 = 42;
-            int val2 = 73;
-
-            TestMsg<int, int> msg;
-            msg.store(val1, val2);
-
-            q.push(msg);
-        });
-
-        t1.join();
-
-        std::cout << "after t1.join" << std::endl;
-    }
-}
-
-TEST(Channel_Tests, MultiThread_Void)
-{
-    Channel<> ch;
-    ch.send();
 }

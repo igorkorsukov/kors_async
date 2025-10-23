@@ -30,6 +30,7 @@ add_executable(${PROJECT_NAME}
     channel_tests.cpp
     async_tests.cpp
     promise_tests.cpp
+    objectpool_tests.cpp
 )
 target_link_libraries(${PROJECT_NAME} gtest_main)
 
