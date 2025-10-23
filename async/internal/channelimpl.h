@@ -29,11 +29,11 @@ SOFTWARE.
 #include <cassert>
 #include <algorithm>
 #include <atomic>
-#include <mutex>
 
 #include "../conf.h"
 #include "../asyncable.h"
 #include "queuepool.h"
+#include "objectpool.h"
 
 namespace kors::async {
 enum class SendMode {
@@ -63,8 +63,11 @@ private:
     };
 
     struct ThreadData {
-        std::thread::id threadId;
+        const std::thread::id threadId;
         std::vector<QueueData*> queues;
+
+        ThreadData(const std::thread::id& thId)
+            : threadId(thId) {}
 
         inline void deleteAll(std::vector<Receiver*>& recs, Asyncable::IConnectable* conn) const
         {
@@ -245,46 +248,23 @@ private:
         std::vector<Receiver*> pendingToRemove;
     };
 
-    std::mutex m_thmutex;
-    std::atomic<size_t> m_thcount = 0;
-    std::vector<ThreadData*> m_threads;
+    ObjectPool<ThreadData*> m_thdatas;
     std::atomic<int> m_enabledReceiversCount = 0;
 
     ThreadData& threadData(const std::thread::id& thId)
     {
-        size_t count = m_thcount.load();
-        assert(count <= m_threads.size());
-        for (size_t i = 0; i < count; ++i) {
-            ThreadData* thdata = m_threads.at(i);
-            assert(thdata);
-            if (thdata && thdata->threadId == thId) {
-                return *m_threads[i];
-            }
+        ThreadData* thdata = m_thdatas.tryGet(
+            [thId](ThreadData* td) { return td->threadId == thId; },
+            [thId] () { return new ThreadData(thId); }
+            );
+
+        if (thdata) {
+            return *thdata;
         }
 
-        // not found, we will create
-        {
-            // the `m_threads` collection itself doesn't change;
-            // we don't lock it, we only lock a slot in this collection.
-            // therefore, we can iterate over this collection
-            // in other threads without a lock.
-            // `m_thcount` limits the number of iterations (only filled slots).
-            std::scoped_lock lock(m_thmutex);
-            for (size_t i = 0; i < m_threads.size(); ++i) {
-                ThreadData* thdata = m_threads.at(i);
-                if (!thdata) {
-                    // found an empty slot
-                    thdata = new ThreadData();
-                    thdata->threadId = thId;
-                    m_threads[i] = thdata;
-                    ++m_thcount;
-                    return *m_threads[i];
-                }
-            }
-        }
-
-        assert(false && "thread pool exhausted");
-        static ThreadData dummy;
+        assert(false && "thread data pool exhausted");
+        static std::thread::id dummyId;
+        static ThreadData dummy(dummyId);
         return dummy;
     }
 
@@ -334,7 +314,9 @@ private:
         }
 
         QueuePool* pool = QueuePool::instance();
-        for (ThreadData* thdata : m_threads) {
+        for (size_t i = 0; i < m_thdatas.count(); ++i) {
+            ThreadData* thdata = m_thdatas.at(i);
+            assert(thdata);
             if (!thdata) {
                 break;
             }
@@ -371,9 +353,10 @@ private:
         sendThdata.receiversCall(args ...);
 
         // we send messages to call in a thread of other receivers
-        for (ThreadData* receiveThdata : m_threads) {
+        for (size_t i = 0; i < m_thdatas.count(); ++i) {
+            ThreadData* receiveThdata = m_thdatas.at(i);
+            assert(receiveThdata);
             if (!receiveThdata) {
-                // there is no one further
                 break;
             }
 
@@ -394,9 +377,10 @@ private:
 
         ThreadData& sendThdata = threadData(threadId);
 
-        for (ThreadData* receiveThdata : m_threads) {
+        for (size_t i = 0; i < m_thdatas.count(); ++i) {
+            ThreadData* receiveThdata = m_thdatas.at(i);
+            assert(receiveThdata);
             if (!receiveThdata) {
-                // there is no one further
                 break;
             }
 
@@ -409,7 +393,7 @@ private:
 public:
 
     ChannelImpl(size_t max_threads = conf::MAX_THREADS_PER_CHANNEL)
-        : m_threads{std::min(max_threads, conf::MAX_THREADS), nullptr} {}
+        : m_thdatas(std::min(max_threads, conf::MAX_THREADS)) {}
 
     ChannelImpl(const ChannelImpl&) = delete;
     ChannelImpl& operator=(const ChannelImpl&) = delete;
@@ -418,17 +402,20 @@ public:
     {
         unregAllQueue();
 
-        for (ThreadData* thdata : m_threads) {
+        for (size_t i = 0; i < m_thdatas.count(); ++i) {
+            ThreadData* thdata = m_thdatas.at(i);
+            assert(thdata);
             if (!thdata) {
                 break;
             }
 
             thdata->clearAll(this);
-            delete thdata;
         }
+
+        m_thdatas.clear();
     }
 
-    size_t maxThreads() const { return m_threads.size(); }
+    size_t maxThreads() const { return m_thdatas.capacity(); }
 
     void send(SendMode mode, const T&... args)
     {
